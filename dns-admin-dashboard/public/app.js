@@ -1,4 +1,4 @@
-/** API에서 읽은 보고서를 DOM의 textContent로 표시한다. 수집 HTML은 실행하지 않는다. */
+/** AI 분석은 서버가 정제한 Markdown HTML로 표시하고, 수집 자료는 textContent로 표시한다. */
 const $ = id => document.getElementById(id);
 const labels = { pending_enqueue: '전송 대기', Queued: '분석 대기', Analyzing: '분석 중', review: '검토 대기', no_block: '차단하지 않음', block_pending: '차단 반영 대기', blocked: '차단 적용 완료', failed: '처리 실패', faild: '처리 실패' };
 let items = [], cursor = null, selected = null, requestId = 0;
@@ -89,7 +89,11 @@ async function openReport(domain) {
     const content = element('div', undefined, 'report-content');
     content.append(element('h3', domain, 'report-domain'), element('p', `분석 시각 ${date(report.analyzed_at)} / KST`, 'report-date'));
     const section = element('section');
-    section.append(element('h4', 'AI 분석 결과'), element('div', report.analysis, 'analysis'));
+    const analysis = element('div', undefined, 'analysis markdown');
+    // 서버에서 허용한 서식만 남긴 HTML을 사용하며, 원본 분석 문자열은 HTML로 삽입하지 않는다.
+    if (typeof report.analysis_html === 'string') analysis.innerHTML = report.analysis_html;
+    else analysis.textContent = report.analysis;
+    section.append(element('h4', 'AI 분석 결과'), analysis);
     content.append(section);
     const facts = element('dl', undefined, 'facts');
     for (const [name, value] of [['페이지 제목', data.title], ['최종 URL', data.final_url], ['작업 ID', report.job_id]]) {

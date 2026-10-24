@@ -5,6 +5,7 @@ import { rateLimit } from 'express-rate-limit';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { AppError } from './store.js';
+import { renderAnalysis } from './markdown.js';
 
 const digest = value => createHash('sha256').update(value).digest();
 const validDomain = value => typeof value === 'string' && value.length <= 253 &&
@@ -43,7 +44,8 @@ export function createApp({ store, username, password }) {
   });
   app.get('/api/report', async (req, res) => {
     if (!validDomain(req.query.domain)) throw new AppError(400, '도메인 형식이 올바르지 않습니다.');
-    res.json(await store.report(req.query.domain));
+    const report = await store.report(req.query.domain);
+    res.json({ ...report, analysis_html: renderAnalysis(report.analysis) });
   });
   app.use(express.static(fileURLToPath(new URL('./public/', import.meta.url))));
   app.use((req, res) => res.status(404).json({ error: '요청한 경로가 없습니다.' }));

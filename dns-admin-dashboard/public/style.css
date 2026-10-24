@@ -15,3 +15,23 @@
 #report-modal .analysis{line-height:1.95}
 .modal-open{overflow:hidden}
 @media(max-width:640px){#report-modal{width:calc(100vw - 16px);max-height:94vh;border-radius:8px}.modal-heading{padding:16px;gap:10px}.modal-heading h2{font-size:15px}#report-modal .report-content{padding:18px}.report-key{max-width:180px}}
+
+/* 정제된 AI 분석 Markdown의 제목, 목록, 표, 코드 서식을 표시한다. */
+.analysis.markdown{white-space:normal;overflow-x:auto}
+.analysis.markdown>:first-child{margin-top:0}
+.analysis.markdown>:last-child{margin-bottom:0}
+.analysis.markdown h1{font-size:23px;margin:24px 0 12px}
+.analysis.markdown h2{font-size:20px;margin:22px 0 10px}
+.analysis.markdown h3{font-size:17px;margin:20px 0 8px}
+.analysis.markdown h4,.analysis.markdown h5,.analysis.markdown h6{font-size:14px;margin:18px 0 8px}
+.analysis.markdown p{margin:10px 0}
+.analysis.markdown ul,.analysis.markdown ol{padding-left:24px;margin:10px 0}
+.analysis.markdown li{margin:5px 0}
+.analysis.markdown strong{font-weight:750;color:#1b3c51}
+.analysis.markdown blockquote{margin:14px 0;border-left:3px solid #9fbac6;padding:2px 14px;color:#546d80}
+.analysis.markdown code{font:12px ui-monospace,monospace;background:#e5edf2;padding:2px 5px;border-radius:3px}
+.analysis.markdown pre{max-height:none;background:#eaf0f4}
+.analysis.markdown pre code{background:none;padding:0}
+.analysis.markdown table{white-space:normal;margin:14px 0;background:#fff}
+.analysis.markdown th,.analysis.markdown td{border:1px solid #d6e1e8;padding:9px;min-width:90px;font-size:12px}
+.analysis.markdown hr{border:0;border-top:1px solid #d2dfe6;margin:20px 0}
