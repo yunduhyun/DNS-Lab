@@ -2,6 +2,7 @@
 const $ = id => document.getElementById(id);
 const labels = { pending_enqueue: '전송 대기', Queued: '분석 대기', Analyzing: '분석 중', review: '검토 대기', no_block: '차단하지 않음', block_pending: '차단 반영 대기', blocked: '차단 적용 완료', failed: '처리 실패', faild: '처리 실패' };
 let items = [], cursor = null, selected = null, requestId = 0;
+let deleteTarget = null, deleting = false, listing = false, listRequestId = 0;
 const date = value => value && !Number.isNaN(new Date(value).getTime()) ? new Date(value).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false }) : '—';
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -9,8 +10,8 @@ function element(tag, text, className) {
   if (className) node.className = className;
   return node;
 }
-async function api(path) {
-  const res = await fetch(path);
+async function api(path, options) {
+  const res = await fetch(path, options);
   if (res.status === 401) throw new Error('관리자 인증이 필요합니다. 페이지를 새로고침해주세요.');
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || '조회에 실패했습니다.');
@@ -46,30 +47,48 @@ function render() {
       button.addEventListener('click', () => openReport(item.domain));
       cell.append(button);
     } else cell.append(element('span', item.status === 'Analyzing' ? '분석 진행 중' : '보고서 위치 미등록', 'unavailable'));
-    row.append(cell);
+    const deleteCell = element('td');
+    const deleteButton = element('button', '삭제', 'button delete-button');
+    deleteButton.dataset.domain = item.domain;
+    deleteButton.disabled = deleting || listing;
+    deleteButton.setAttribute('aria-label', `${item.domain} 삭제`);
+    deleteButton.addEventListener('click', () => openDelete(item));
+    deleteCell.append(deleteButton);
+    row.append(cell, deleteCell);
     $('rows').append(row);
   }
   if (!visible.length) {
     const cell = element('td', items.length ? '조건에 맞는 도메인이 없습니다.' : '등록된 도메인이 없습니다.');
-    cell.colSpan = 6;
+    cell.colSpan = 7;
     const row = element('tr'); row.append(cell); $('rows').append(row);
   }
 }
 async function load(reset = false) {
+  if (deleting) return;
+  const id = ++listRequestId;
+  listing = true;
+  render();
   $('refresh').disabled = true; $('more').disabled = true;
   $('list-message').textContent = '목록을 불러오는 중입니다...';
   try {
     const data = await api(`/api/domains${!reset && cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`);
+    if (id !== listRequestId) return;
     items = reset ? data.items : [...new Map([...items, ...data.items].map(item => [item.domain, item])).values()];
     cursor = data.cursor;
     $('more').hidden = !cursor;
     $('mode').textContent = data.mode === 'demo'
-      ? '샘플 데이터 모드입니다. 실제 AWS 자원이나 도메인 분석 결과가 아닙니다.'
-      : 'AWS 연결 모드입니다. DynamoDB 목록과 S3 보고서를 조회합니다. 표시 시각은 한국 시간입니다.';
+      ? '샘플 데이터'
+      : 'AWS 연결';
     $('list-message').textContent = '';
     render();
   } catch (error) { $('list-message').textContent = error.message; }
-  finally { $('refresh').disabled = false; $('more').disabled = false; }
+  finally {
+    if (id === listRequestId) {
+      listing = false;
+      $('refresh').disabled = deleting; $('more').disabled = deleting;
+      render();
+    }
+  }
 }
 function addSection(parent, title, text) {
   const section = element('section', undefined, 'report-section');
@@ -87,7 +106,7 @@ async function openReport(domain) {
     if (id !== requestId || !$('report-modal').open) return;
     const data = report.collected_data;
     const content = element('div', undefined, 'report-content');
-    content.append(element('h3', domain, 'report-domain'), element('p', `분석 시각 ${date(report.analyzed_at)} / KST`, 'report-date'));
+    content.append(element('p', `분석 시각 ${date(report.analyzed_at)} KST`, 'report-date'));
     const section = element('section');
     const analysis = element('div', undefined, 'analysis markdown');
     // 서버에서 허용한 서식만 남긴 HTML을 사용하며, 원본 분석 문자열은 HTML로 삽입하지 않는다.
@@ -133,6 +152,65 @@ $('report-modal').addEventListener('close', () => {
     .find(button => button.dataset.domain === previousDomain);
   (trigger || $('search')).focus();
 });
+function openDelete(item) {
+  if (deleting || listing) return;
+  deleteTarget = { ...item };
+  $('delete-domain').textContent = item.domain;
+  $('delete-key').textContent = item.report_s3_key || '등록된 보고서 없음';
+  $('delete-confirmation').value = '';
+  $('delete-error').textContent = '';
+  $('confirm-delete').disabled = true;
+  $('delete-modal').showModal();
+  document.body.classList.add('modal-open');
+}
+$('delete-confirmation').addEventListener('input', () => {
+  $('confirm-delete').disabled = deleting || $('delete-confirmation').value !== deleteTarget?.domain;
+});
+$('close-delete').addEventListener('click', () => { if (!deleting) $('delete-modal').close(); });
+$('delete-modal').addEventListener('cancel', event => { if (deleting) event.preventDefault(); });
+$('delete-modal').addEventListener('close', () => {
+  const domain = deleteTarget?.domain;
+  deleteTarget = null;
+  if (!$('report-modal').open) document.body.classList.remove('modal-open');
+  const trigger = [...document.querySelectorAll('.delete-button')].find(button => button.dataset.domain === domain);
+  (trigger || $('search')).focus();
+});
+$('delete-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!deleteTarget || deleting || $('delete-confirmation').value !== deleteTarget.domain) return;
+  const target = deleteTarget;
+  deleting = true;
+  $('confirm-delete').disabled = true;
+  $('confirm-delete').textContent = '삭제 중';
+  $('close-delete').disabled = true;
+  $('delete-confirmation').disabled = true;
+  $('refresh').disabled = true; $('more').disabled = true;
+  $('delete-error').textContent = '';
+  render();
+  try {
+    const expected = Object.fromEntries(['status', 'created_at', 'updated_at', 'report_s3_key']
+      .map(field => [field, target[field] ?? null]));
+    await api('/api/domains', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'DNSAdmin' },
+      body: JSON.stringify({ domain: target.domain, confirmation: $('delete-confirmation').value, expected })
+    });
+    items = items.filter(item => item.domain !== target.domain);
+    render();
+    $('list-message').textContent = `${target.domain} 삭제 완료`;
+    $('delete-modal').close();
+  } catch (error) {
+    $('delete-error').textContent = error.message;
+  } finally {
+    deleting = false;
+    $('confirm-delete').textContent = '삭제';
+    $('confirm-delete').disabled = $('delete-confirmation').value !== deleteTarget?.domain;
+    $('close-delete').disabled = false;
+    $('delete-confirmation').disabled = false;
+    $('refresh').disabled = false; $('more').disabled = false;
+    render();
+  }
+});
 $('search').addEventListener('input', render);
 $('status').addEventListener('change', render);
 $('refresh').addEventListener('click', () => load(true));
@@ -142,6 +220,8 @@ for (const [id, value] of [['all-view', ''], ['review-view', 'review']]) {
     $('status').value = value;
     $('all-view').classList.toggle('active', !value);
     $('review-view').classList.toggle('active', !!value);
+    $('all-view').setAttribute('aria-pressed', String(!value));
+    $('review-view').setAttribute('aria-pressed', String(!!value));
     document.querySelector('h1').textContent = value ? '검토 대상' : '도메인 현황';
     render();
   });

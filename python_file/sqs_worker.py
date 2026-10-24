@@ -1,8 +1,8 @@
 """SQS에서 작업 하나를 수신하여 수집, AI 분석, 보고서 저장을 실행한다.
 
-실행 순서: SQS 수신 → 자료 수집 → Analyzing 갱신 → AI 분석 → S3 저장이다.
+실행 순서: SQS 수신 → 자료 수집 → Analyzing 갱신 → AI 분석 → S3 저장 → 보고서 위치 갱신 → SQS 삭제다.
 수신할 메시지가 없거나 웹 수집에 실패하면 종료한다.
-실행 한 번에 메시지 하나만 처리하며, SQS 메시지는 아직 삭제하지 않는다.
+실행 한 번에 메시지 하나만 처리하며, 저장과 갱신이 모두 성공한 메시지만 삭제한다.
 """
 
 import json
@@ -30,13 +30,16 @@ def main():
     MaxNumberOfMessages=1,
     WaitTimeSeconds=20
   )
+  
   messages = response.get("Messages", [])
 
   if not messages:
     print("수신할 메시지가 없습니다.")
     return
 
-  task = json.loads(messages[0]["Body"])
+  message = messages[0]
+  task = json.loads(message["Body"])
+
   domain = task["domain"]
   job_id = task["job_id"]
 
@@ -56,7 +59,14 @@ def main():
   print(analysis)
 
   report_s3_key = save_report(s3, dynamodb, domain, job_id, collected_data, analysis)
-  print(f"S3 저장 및 DynamoDB 보고서 저장 완료: {report_s3_key}")
+  print(f"S3 저장 및 DynamoDB 보고서 위치 기록 완료: {report_s3_key}")
+
+  # 보고서 저장과 DynamoDB 갱신이 성공한 작업만 큐에서 삭제한다.
+  sqs.delete_message(
+    QueueUrl=QUEUE_URL,
+    ReceiptHandle=message["ReceiptHandle"]
+  )
+  print(f"SQS 메시지 삭제 완료: {domain}")
 
 # 다른 파일에서 import할 때는 작업을 시작하지 않고, 직접 실행할 때만 호출한다.
 if __name__ == "__main__":

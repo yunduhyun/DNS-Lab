@@ -2,7 +2,8 @@
 
 기존 도메인의 status와 updated_at을 갱신한다.
 수집 자료와 AI 분석 결과를 reports/도메인/job_id.json 경로에 저장한다.
-분석 완료 상태 갱신과 SQS 메시지 삭제는 아직 수행하지 않는다.
+S3 저장 후 DynamoDB에 보고서 위치를 기록한다.
+분석 완료 상태는 아직 갱신하지 않으며, SQS 삭제는 호출한 실행 파일에서 수행한다.
 """
 
 import json
@@ -33,8 +34,8 @@ def mark_analyzing(dynamodb, domain):
   )
 
 
-def save_report(s3 ,dynamodb, domain, job_id, collected_data, analysis):
-  """수집 자료와 분석 결과를 JSON으로 저장하고 S3 객체 키를 반환한다."""
+def save_report(s3, dynamodb, domain, job_id, collected_data, analysis):
+  """S3에 보고서를 저장하고 DynamoDB에 위치를 기록한 뒤 객체 키를 반환한다."""
   report = {
     "domain": domain,
     "job_id": job_id,
@@ -73,6 +74,6 @@ def save_report(s3 ,dynamodb, domain, job_id, collected_data, analysis):
       ":key": {"S": report_s3_key},
       ":updated_at": {"S": datetime.now(timezone.utc).isoformat()}
     }
-  )
-  
+  )  
+
   return report_s3_key

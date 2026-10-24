@@ -1,21 +1,40 @@
 <!doctype html>
 <html lang="ko">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>DNS Observatory | 관리자</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>DNS 관리자</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
 <body>
-  <aside class="sidebar"><a class="brand" href="/">◈ <span>DNS<br><small>OBSERVATORY</small></span></a><div class="side-label">WORKSPACE</div><nav aria-label="주 메뉴"><button class="nav active" id="all-view">▤ 도메인 현황</button><button class="nav" id="review-view">◎ 검토 대상</button></nav><div class="side-bottom">RPZ SECURITY<br><span>관리자 콘솔 / MVP 0.1</span></div></aside>
+  <aside class="sidebar">
+    <a class="brand" href="/">DNS 관리자</a>
+    <nav aria-label="주 메뉴">
+      <button class="nav active" id="all-view" aria-pressed="true">도메인 현황</button>
+      <button class="nav" id="review-view" aria-pressed="false">검토 대상</button>
+    </nav>
+  </aside>
   <main>
-    <header><span class="breadcrumb">보안 운영 <span>/</span> 도메인 분석</span><span class="admin">ADMIN</span></header>
-    <section class="heading"><div><p class="eyebrow">DOMAIN INTELLIGENCE</p><h1>도메인 현황</h1><p class="muted">DNS에서 관찰한 도메인의 분석 상태와 보고서를 확인하세요.</p></div><button id="refresh" class="button">↻ 새로고침</button></section>
-    <div class="notice" id="mode" role="status">데이터 연결 확인 중</div>
+    <section class="heading"><h1>도메인 현황</h1><button id="refresh" class="button">새로고침</button></section>
+    <div class="notice" id="mode" role="status">불러오는 중</div>
     <section class="stats" aria-label="불러온 목록 요약"><div><span>불러온 도메인</span><strong id="total">—</strong></div><div><span>분석 대기 및 진행</span><strong id="processing">—</strong></div><div><span>검토 대기</span><strong id="reviews">—</strong></div><div><span>보고서 등록</span><strong id="reports">—</strong></div></section>
     <section class="workspace domain-list">
       <div class="panel list-panel"><div class="panel-title"><h2>관찰 도메인</h2><span id="count">0개</span></div><div class="filters"><label><span class="sr-only">불러온 도메인 검색</span><input id="search" type="search" placeholder="도메인 검색"></label><label><span class="sr-only">상태 필터</span><select id="status"><option value="">전체 상태</option><option value="Queued">분석 대기</option><option value="pending_enqueue">전송 대기</option><option value="Analyzing">분석 중</option><option value="review">검토 대기</option><option value="no_block">차단하지 않음</option><option value="block_pending">차단 반영 대기</option><option value="blocked">차단 적용 완료</option><option value="failed">처리 실패</option></select></label></div>
-        <p class="hint">검색과 집계는 불러온 목록에 적용됩니다.</p><div id="list-message" class="message" role="status"></div><div class="table-scroll"><table><thead><tr><th>domain</th><th>created_at <span class="column-note">KST</span></th><th>report_s3_key</th><th>status</th><th>updated_at <span class="column-note">KST</span></th><th>보고서</th></tr></thead><tbody id="rows"></tbody></table></div><div class="list-footer"><span>목록은 조회 시점의 상태입니다.</span><button id="more" class="button" hidden>더 불러오기</button></div>
+        <p class="hint">검색 및 집계는 불러온 목록 기준</p><div id="list-message" class="message" role="status"></div><div class="table-scroll"><table><thead><tr><th>domain</th><th>created_at <span class="column-note">KST</span></th><th>report_s3_key</th><th>status</th><th>updated_at <span class="column-note">KST</span></th><th>보고서</th><th>삭제</th></tr></thead><tbody id="rows"></tbody></table></div><div class="list-footer"><button id="more" class="button" hidden>더 불러오기</button></div>
       </div>
-    </section><footer>DNS OBSERVATORY <span>차단 결정과 RPZ 적용 기능은 후속 단계에 연결합니다.</span></footer>
+    </section>
   </main>
   <dialog id="report-modal" aria-labelledby="modal-title">
-    <div class="modal-heading"><div><p class="eyebrow">ANALYSIS REPORT</p><h2 id="modal-title">분석 보고서</h2></div><button id="close-report" class="button" aria-label="보고서 닫기" autofocus>닫기 ×</button></div>
+    <div class="modal-heading"><h2 id="modal-title">분석 보고서</h2><button id="close-report" class="button" aria-label="보고서 닫기" autofocus>닫기</button></div>
     <div id="detail" aria-live="polite"></div>
+  </dialog>
+  <dialog id="delete-modal" aria-labelledby="delete-title" aria-describedby="delete-description">
+    <form id="delete-form">
+      <div class="modal-heading"><h2 id="delete-title">도메인 삭제</h2><button type="button" id="close-delete" class="button">취소</button></div>
+      <div class="delete-content">
+        <p id="delete-description">DynamoDB 항목과 연결된 S3 보고서를 삭제합니다.</p>
+        <dl class="facts"><dt>도메인</dt><dd id="delete-domain"></dd><dt>보고서</dt><dd id="delete-key"></dd></dl>
+        <p class="delete-hint">SQS 작업과 RPZ 정책은 유지됩니다. 실행 중인 분석 프로그램은 중지한 뒤 삭제해주세요.</p>
+        <label for="delete-confirmation">삭제할 도메인을 입력해주세요.</label>
+        <input id="delete-confirmation" type="text" autocomplete="off" spellcheck="false" required autofocus>
+        <p id="delete-error" role="alert"></p>
+        <button id="confirm-delete" class="button delete-button" type="submit" disabled>삭제</button>
+      </div>
+    </form>
   </dialog>
 </body></html>

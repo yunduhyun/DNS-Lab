@@ -1,7 +1,7 @@
-/** DynamoDB 목록과 S3 보고서를 조회한다. demo 모드는 AWS를 호출하지 않는다. */
+/** DynamoDB 목록과 S3 보고서를 조회하고 선택한 도메인의 기록을 삭제한다. demo 모드는 AWS를 호출하지 않는다. */
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, GetCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
-import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { DynamoDBDocumentClient, GetCommand, ScanCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb';
+import { S3Client, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 
 export class AppError extends Error {
   constructor(status, message) {
@@ -31,16 +31,39 @@ function demoReport(domain) {
   };
 }
 
+const snapshotFields = ['status', 'created_at', 'updated_at', 'report_s3_key'];
+
+function checkSnapshot(item, expected) {
+  if (!snapshotFields.every(field => (item[field] ?? null) === expected[field])) {
+    throw new AppError(409, '항목이 변경되었습니다. 목록을 새로고침한 뒤 다시 확인해주세요.');
+  }
+}
+
+function reportKey(domain, key) {
+  if (typeof key !== 'string' || !key.startsWith(`reports/${domain}/`) || !key.endsWith('.json')) {
+    throw new AppError(422, '등록된 보고서 경로를 확인해주세요.');
+  }
+  return key;
+}
+
 export function createStore(env) {
   if (env.DATA_MODE === 'demo') {
+    let records = samples.map(item => ({ ...item }));
     return {
       mode: 'demo',
-      async list() { return { items: samples, cursor: null }; },
+      async list() { return { items: records, cursor: null }; },
       async report(domain) {
-        const item = samples.find(row => row.domain === domain);
+        const item = records.find(row => row.domain === domain);
         if (!item) throw new AppError(404, '등록된 도메인이 없습니다.');
         if (!item.report_s3_key) throw new AppError(409, '보고서 위치가 아직 등록되지 않았습니다.');
         return demoReport(domain);
+      },
+      async remove(domain, expected) {
+        const item = records.find(row => row.domain === domain);
+        if (!item) throw new AppError(404, '등록된 도메인이 없습니다.');
+        checkSnapshot(item, expected);
+        records = records.filter(row => row.domain !== domain);
+        return { domain, report_deleted: Boolean(item.report_s3_key) };
       }
     };
   }
@@ -69,10 +92,7 @@ export function createStore(env) {
       if (!item) throw new AppError(404, '등록된 도메인이 없습니다.');
       if (!item.report_s3_key) throw new AppError(409, '보고서 위치가 아직 등록되지 않았습니다.');
       // 브라우저가 임의의 S3 키를 지정하지 못하도록 DB의 도메인별 경로만 사용한다.
-      const key = item.report_s3_key;
-      if (typeof key !== 'string' || !key.startsWith(`reports/${domain}/`) || !key.endsWith('.json')) {
-        throw new AppError(422, '등록된 보고서 경로를 확인해주세요.');
-      }
+      const key = reportKey(domain, item.report_s3_key);
       let result;
       try {
         result = await s3.send(new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: key }));
@@ -99,6 +119,52 @@ export function createStore(env) {
         throw new AppError(422, '보고서 형식이나 도메인이 일치하지 않습니다.');
       }
       return report;
+    },
+    async remove(domain, expected) {
+      const { Item: item } = await db.send(new GetCommand({
+        TableName: env.DYNAMODB_TABLE, Key: { domain }, ConsistentRead: true
+      }));
+      if (!item) throw new AppError(404, '등록된 도메인이 없습니다.');
+      checkSnapshot(item, expected);
+      const hasReport = item.report_s3_key !== undefined && item.report_s3_key !== null;
+      if (hasReport) {
+        const key = reportKey(domain, item.report_s3_key);
+        try {
+          await s3.send(new DeleteObjectCommand({ Bucket: env.S3_BUCKET, Key: key }));
+        } catch {
+          throw new AppError(502, 'S3 보고서 삭제에 실패했습니다. DynamoDB 항목은 삭제하지 않았습니다.');
+        }
+      }
+      // 두 서비스의 삭제는 원자적이지 않으므로 S3 실패 시 DB의 경로를 보존하고, DB 동시 변경은 거절한다.
+      const names = { '#domain': 'domain' };
+      const values = {};
+      const conditions = ['attribute_exists(#domain)'];
+      for (const [index, field] of snapshotFields.entries()) {
+        const name = `#field${index}`;
+        names[name] = field;
+        if (item[field] === undefined) conditions.push(`attribute_not_exists(${name})`);
+        else {
+          const value = `:value${index}`;
+          values[value] = item[field];
+          conditions.push(`${name} = ${value}`);
+        }
+      }
+      try {
+        await db.send(new DeleteCommand({
+          TableName: env.DYNAMODB_TABLE, Key: { domain },
+          ConditionExpression: conditions.join(' AND '),
+          ExpressionAttributeNames: names,
+          ...(Object.keys(values).length ? { ExpressionAttributeValues: values } : {})
+        }));
+      } catch (error) {
+        const reason = error.name === 'ConditionalCheckFailedException'
+          ? '항목이 변경되어 DynamoDB 삭제를 중단했습니다.'
+          : 'DynamoDB 항목 삭제에 실패했습니다.';
+        const partial = hasReport ? ' S3 보고서 삭제는 완료됐습니다.' : '';
+        throw new AppError(error.name === 'ConditionalCheckFailedException' ? 409 : 502,
+          reason + partial + ' 목록을 새로고침하고 상태를 확인해주세요.');
+      }
+      return { domain, report_deleted: hasReport };
     }
   };
 }
