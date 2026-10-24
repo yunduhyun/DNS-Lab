@@ -1,0 +1,9 @@
+{
+  "name": "dns-admin-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {"start": "node --env-file=.env server.js", "test": "node --test"},
+  "engines": {"node": ">=22"},
+  "dependencies": {"@aws-sdk/client-dynamodb": "^3.0.0", "@aws-sdk/client-s3": "^3.0.0", "@aws-sdk/lib-dynamodb": "^3.0.0", "express": "^5.0.0", "express-rate-limit": "^8.0.0", "helmet": "^8.0.0"}
+}
