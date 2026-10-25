@@ -21,9 +21,8 @@ export function createApp({ store, username, password }) {
     directives: { 'upgrade-insecure-requests': null }
   } }));
   app.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
-  const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, skipSuccessfulRequests: true,
-    message: '로그인 시도가 많습니다. 잠시 후 다시 시도해주세요.' });
-  app.use(authLimiter);
+  const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20,
+    message: { error: '로그인 시도가 많습니다. 잠시 후 다시 시도해주세요.' } });
   app.use((req, res, next) => {
     const header = req.get('authorization') || '';
     const raw = header.startsWith('Basic ') ? Buffer.from(header.slice(6), 'base64').toString('utf8') : '';
@@ -31,8 +30,11 @@ export function createApp({ store, username, password }) {
     const userMatch = timingSafeEqual(digest(raw.slice(0, split)), digest(username));
     const passMatch = timingSafeEqual(digest(raw.slice(split + 1)), digest(password));
     if (split < 0 || !userMatch || !passMatch) {
-      res.set('WWW-Authenticate', 'Basic realm="DNS Admin", charset="UTF-8"');
-      return res.status(401).send('관리자 인증이 필요합니다.');
+      // 인증 실패만 집계한다. API 오류나 다른 접속자의 실패가 정상 관리자를 차단하지 않도록 한다.
+      return authLimiter(req, res, () => {
+        res.set('WWW-Authenticate', 'Basic realm="DNS Admin", charset="UTF-8"');
+        res.status(401).send('관리자 인증이 필요합니다.');
+      });
     }
     next();
   });
