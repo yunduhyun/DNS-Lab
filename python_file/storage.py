@@ -13,67 +13,72 @@ TABLE_NAME = "dns-domain-analysis"
 REPORT_BUCKET = "dns-analysis-reports-994899741506-ap-northeast-2-an"
 
 
-def mark_analyzing(dynamodb, domain):
-  """기존 항목만 Analyzing으로 갱신하고 UTC 시각을 기록한다."""
-  # AI 요청 직전에 도메인의 상태와 갱신 시각을 기록한다.
-  dynamodb.update_item(
-    TableName=TABLE_NAME,
-    Key={
-      "domain": {"S": domain}
-    },
-    UpdateExpression="SET #status = :status, updated_at = :updated_at",
-    ConditionExpression="attribute_exists(#domain)",
-    ExpressionAttributeNames={
-      "#status": "status",
-      "#domain": "domain"
-    },
-    ExpressionAttributeValues={
-      ":status": {"S": "Analyzing"},
-      ":updated_at": {"S": datetime.now(timezone.utc).isoformat()}
+class ReportStorage:
+  def __init__(self, s3, dynamodb):
+    self.s3 = s3
+    self.dynamodb = dynamodb
+
+  def mark_analyzing(self, domain):
+    """기존 항목만 Analyzing으로 갱신하고 UTC 시각을 기록한다."""
+    # AI 요청 직전에 도메인의 상태와 갱신 시각을 기록한다.
+    self.dynamodb.update_item(
+      TableName=TABLE_NAME,
+      Key={
+        "domain": {"S": domain}
+      },
+      UpdateExpression="SET #status = :status, updated_at = :updated_at",
+      ConditionExpression="attribute_exists(#domain)",
+      ExpressionAttributeNames={
+        "#status": "status",
+        "#domain": "domain"
+      },
+      ExpressionAttributeValues={
+        ":status": {"S": "Analyzing"},
+        ":updated_at": {"S": datetime.now(timezone.utc).isoformat()}
+      }
+    )
+
+
+  def save_report(self, domain, job_id, collected_data, analysis):
+    """S3에 보고서를 저장하고 DynamoDB에 위치를 기록한 뒤 객체 키를 반환한다."""
+    report = {
+      "domain": domain,
+      "job_id": job_id,
+      "analyzed_at": datetime.now(timezone.utc).isoformat(),
+      "collected_data": collected_data,
+      "analysis": analysis
     }
-  )
 
+    report_s3_key = f"reports/{domain}/{job_id}.json"
 
-def save_report(s3, dynamodb, domain, job_id, collected_data, analysis):
-  """S3에 보고서를 저장하고 DynamoDB에 위치를 기록한 뒤 객체 키를 반환한다."""
-  report = {
-    "domain": domain,
-    "job_id": job_id,
-    "analyzed_at": datetime.now(timezone.utc).isoformat(),
-    "collected_data": collected_data,
-    "analysis": analysis
-  }
-
-  report_s3_key = f"reports/{domain}/{job_id}.json"
-
-  # JSON 보고서를 UTF-8 바이트로 변환하여 S3에 저장한다.
-  s3.put_object(
-    Bucket=REPORT_BUCKET,
-    Key=report_s3_key,
-    Body=json.dumps(
-      report,
-      ensure_ascii=False,
-      indent=2
-    ).encode("utf-8"),
-    ContentType="application/json; charset=utf-8"
-  )
+    # JSON 보고서를 UTF-8 바이트로 변환하여 S3에 저장한다.
+    self.s3.put_object(
+      Bucket=REPORT_BUCKET,
+      Key=report_s3_key,
+      Body=json.dumps(
+        report,
+        ensure_ascii=False,
+        indent=2
+      ).encode("utf-8"),
+      ContentType="application/json; charset=utf-8"
+    )
 
   
-  # S3 저장이 성공한 뒤 보고서 위치와 갱신 시각을 기록한다.
-  dynamodb.update_item(
-    TableName=TABLE_NAME,
-    Key={
-      "domain": {"S": domain}
-    },
-    UpdateExpression="SET report_s3_key = :key, updated_at = :updated_at",
-    ConditionExpression="attribute_exists(#domain)",
-    ExpressionAttributeNames={
-      "#domain": "domain"
-    },
-    ExpressionAttributeValues={
-      ":key": {"S": report_s3_key},
-      ":updated_at": {"S": datetime.now(timezone.utc).isoformat()}
-    }
-  )  
+    # S3 저장이 성공한 뒤 보고서 위치와 갱신 시각을 기록한다.
+    self.dynamodb.update_item(
+      TableName=TABLE_NAME,
+      Key={
+        "domain": {"S": domain}
+      },
+      UpdateExpression="SET report_s3_key = :key, updated_at = :updated_at",
+      ConditionExpression="attribute_exists(#domain)",
+      ExpressionAttributeNames={
+        "#domain": "domain"
+      },
+      ExpressionAttributeValues={
+        ":key": {"S": report_s3_key},
+        ":updated_at": {"S": datetime.now(timezone.utc).isoformat()}
+      }
+    )
 
-  return report_s3_key
+    return report_s3_key

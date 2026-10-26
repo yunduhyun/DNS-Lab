@@ -1,144 +1,99 @@
 # DNS 분석 프로그램 구조 및 실행 안내
 
-## 1. 정리 목적
-
-기존 `sqs_worker.py`에 모여 있던 기능을 역할별로 분리한다. 실행 파일에는 전체 처리 순서를 남기고, 자료 수집과 AI 분석, 저장 코드는 각각의 파일에서 관리한다. 기존 처리 방식과 AWS 자원 이름은 유지한다.
-
-## 2. 폴더 구성
+## 폴더 구성
 
 ```text
-dns_project/
-├── sqs_worker.py    # SQS 수신과 전체 실행 순서
-├── collector.py     # DNS 조회와 웹 자료 수집
-├── analyzer.py      # 로컬 Ollama 분석 요청
-├── storage.py       # DynamoDB 갱신과 S3 보고서 저장
-├── README.md        # 구조와 실행 방법 설명
-└── .venv/           # 기존 Python 가상환경
+python_file/
+├── main.py          # 단일 진입점과 객체 생성
+├── sqs_worker.py    # SQSWorker 클래스
+├── collector.py     # DomainCollector 클래스
+├── analyzer.py      # GemmaAnalyzer 클래스
+├── storage.py       # ReportStorage 클래스
+├── test_worker.py   # 외부 호출 없는 처리 순서 검증
+└── .env             # BAZE_API_KEY와 BAZE_MODEL 설정
 ```
 
-모든 Python 파일은 같은 폴더에 배치한다. 새 패키지를 추가하지 않고 기존 가상환경을 사용한다. Python 들여쓰기는 단계마다 공백 2칸을 사용한다.
+기존 파일별 역할은 유지하고 함수들을 해당 클래스의 메서드로 옮긴다. 메서드는 객체에 속한 함수다. Python 들여쓰기는 단계마다 공백 2칸을 사용한다.
 
-## 3. 전체 실행 흐름
+## 실행 방법
 
-```text
-SQS에서 메시지 하나 수신
-  → Body에서 domain과 job_id 추출
-  → DNS와 웹 자료 수집
-  → DynamoDB 상태를 Analyzing으로 변경
-  → Ollama에 분석 요청
-  → 분석 결과 출력
-  → 수집 자료와 분석 결과를 S3에 저장
-  → 프로그램 종료
-```
-
-실행 한 번에 메시지 하나만 처리한다. 메시지가 없으면 최대 20초 동안 수신을 기다린 뒤 종료한다. 웹 수집에 실패하면 AI 분석과 보고서 저장을 진행하지 않는다.
-
-`Analyzing`은 AI 호출 직전에 기록하는 처리 상태다. Ollama 서버가 요청을 수락했다는 확인이나 분석 완료를 의미하지 않는다.
-
-## 4. 파일별 역할
-
-| 파일 | 주요 함수 | 입력 | 반환값과 역할 |
-|---|---|---|---|
-| `sqs_worker.py` | `main()` | SQS 메시지 | 각 기능을 순서대로 호출한다. |
-| `collector.py` | `collect_data(domain, job_id)` | 도메인과 작업 ID | 수집 자료 딕셔너리를 반환하며, 웹 수집 실패 시 `None`을 반환한다. |
-| `analyzer.py` | `analyze_data(collected_data)` | 수집 자료 | AI 분석 본문 문자열을 반환한다. |
-| `storage.py` | `mark_analyzing(dynamodb, domain)` | DynamoDB 클라이언트와 도메인 | 기존 항목의 상태와 갱신 시각을 변경한다. |
-| `storage.py` | `save_report(s3, domain, job_id, collected_data, analysis)` | S3 클라이언트와 보고서 자료 | 보고서를 저장하고 객체 키를 반환한다. |
-
-### 자료 수집
-
-`collector.py`는 최초 도메인의 A와 AAAA 레코드를 조회한다. DNS 유형별 조회 시간은 5초로 설정한다. 조회 실패도 자료에 기록한다.
-
-웹페이지는 HTTPS로 먼저 요청하며, 기존에 지정한 curl 종료 코드에서만 HTTP로 한 번 재시도한다. 요청별 제한 시간은 15초, 리다이렉트는 최대 5회, 본문 크기 제한 설정은 2,000,000바이트다.
-
-응답 헤더, 최종 URL, 제목, 외부 스크립트 주소, 링크, 폼, 본문 텍스트를 추출한다. 링크와 폼의 상대 주소는 최종 URL과 HTML의 `base` 태그를 기준으로 해석한다. 스크립트 주소는 기존처럼 원본 값을 보관한다.
-
-JavaScript를 실행하거나 링크를 방문하거나 폼을 제출하지 않는다. 스크립트와 스타일 제거는 분석용 자료 정리이며, HTML을 안전하게 표시하기 위한 보안 정제 기능은 아니다.
-
-### AI 분석
-
-`analyzer.py`는 수집 자료를 `http://localhost:11434/api/chat`으로 전달한다. 모델은 `qwen3.5:9b`이며, `stream=False`와 `timeout=300` 설정을 유지한다.
-
-수집 자료의 지시문을 따르지 않고, 확인 사실과 판단의 한계를 설명하도록 기존 프롬프트를 유지한다. 악성 판단 룰, 위험 점수, 자동 차단 기준은 이번 작업에서 추가하지 않는다.
-
-### 상태 갱신과 보고서 저장
-
-`mark_analyzing()`은 수신한 `domain`을 PK로 지정하고 다음 값을 갱신한다.
-
-| 속성 | 기록 내용 |
-|---|---|
-| `status` | `Analyzing`을 기록한다. |
-| `updated_at` | UTC 기준 ISO 형식 시각을 기록한다. |
-
-`attribute_exists` 조건으로 기존 항목만 갱신한다. 해당 도메인이 없으면 오류를 발생시키며, 새 항목을 만들지 않는다.
-
-`save_report()`는 다음 구조의 JSON을 UTF-8로 저장한다. JSON 들여쓰기는 공백 2칸을 사용한다.
-
-| 보고서 필드 | 내용 |
-|---|---|
-| `domain` | 분석 대상 도메인을 기록한다. |
-| `job_id` | SQS 메시지의 작업 ID를 기록한다. |
-| `analyzed_at` | 보고서 생성 시각을 UTC로 기록한다. |
-| `collected_data` | DNS 정보와 웹 수집 자료를 기록한다. |
-| `analysis` | AI 분석 본문을 기록한다. |
-
-객체 키는 `reports/{domain}/{job_id}.json` 형식이다. 같은 도메인과 작업 ID로 다시 저장하면 동일한 키로 업로드한다. 별도의 로컬 보고서 파일은 생성하지 않는다.
-
-## 5. 설정 위치
-
-다음 값은 모듈화 이전 실제 작업 파일에서 확인한 코드 설정이다. AWS 콘솔의 현재 자원이나 권한 상태를 직접 조회한 결과는 아니다.
-
-| 설정 | 위치 | 현재 값 |
-|---|---|---|
-| AWS 프로필 | `sqs_worker.py` | `dns-project`다. |
-| AWS 리전 | `sqs_worker.py` | `ap-northeast-2`다. |
-| SQS URL | `sqs_worker.py` | `https://sqs.ap-northeast-2.amazonaws.com/994899741506/dns-domain-analysis.fifo`다. |
-| DynamoDB 테이블 | `storage.py` | `dns-domain-analysis`다. |
-| S3 버킷 | `storage.py` | `dns-analysis-reports-994899741506-ap-northeast-2-an`이다. |
-| AI 모델과 API 주소 | `analyzer.py` | `qwen3.5:9b`와 로컬 Ollama 주소를 사용한다. |
-
-실제 코드의 버킷 이름은 대화 초기에 제안한 이름보다 길다. 기존 값을 유지하므로 IAM 정책의 S3 리소스도 실제 이름과 일치해야 한다. 보고서 업로드 대상 ARN은 다음과 같다.
-
-```text
-arn:aws:s3:::dns-analysis-reports-994899741506-ap-northeast-2-an/reports/*
-```
-
-로컬 프로그램은 기존 `dns-project` 프로필로 클라이언트를 생성한다. 현재 처리에 사용하는 권한은 `sqs:ReceiveMessage`, `dynamodb:UpdateItem`, `s3:PutObject`다. 이번 작업은 IAM 정책을 변경하지 않는다.
-
-## 6. 실행 방법
-
-터미널에서 다음 명령을 실행한다.
+프로젝트 루트에서 터미널 명령을 실행한다.
 
 ```bash
 cd /Users/yunduhyun/Desktop/dns_project
-.venv/bin/python sqs_worker.py
+.venv/bin/python python_file/main.py
 ```
 
-직접 실행하면 `main()`을 호출한다. 다른 파일에서 모듈을 가져오기만 할 때는 메시지를 수신하거나 AWS를 갱신하지 않는다.
+진입점은 `main.py`다. 기존 `sqs_worker.py`는 클래스 정의를 제공하며 직접 실행해도 작업을 시작하지 않는다. 실행 한 번에 메시지 하나만 처리하고 종료한다. 메시지가 없으면 최대 20초 동안 기다린 뒤 종료한다.
 
-정상 처리 시 수집 자료 출력 이후 다음 메시지가 순서대로 나타난다.
+## 실행 순서와 코드 변경
 
-```text
-DynamoDB 상태 변경 완료: Analyzing
-로컬 AI 분석 중...
-AI 분석 결과:
-분석 본문
-S3 보고서 저장 완료: reports/도메인/작업ID.json
+기존 진입점의 주요 호출은 다음과 같다.
+
+```python
+collected_data = collect_data(domain, job_id)
+mark_analyzing(dynamodb, domain)
+analysis = analyze_data(collected_data)
+report_s3_key = save_report(s3, dynamodb, domain, job_id, collected_data, analysis)
 ```
 
-DynamoDB에서 해당 도메인의 `status`와 `updated_at`을 확인하고, S3 버킷의 `reports/` 아래에서 JSON 보고서를 확인한다. 이 절차는 실제 환경에서 사용자가 실행할 확인 방법이다.
+새 진입점은 다음 순서로 객체를 생성한다.
 
-## 7. 검증 결과와 현재 한계
+```python
+session = boto3.Session(profile_name=AWS_PROFILE)
+sqs = session.client("sqs", region_name=AWS_REGION)
+dynamodb = session.client("dynamodb", region_name=AWS_REGION)
+s3 = session.client("s3", region_name=AWS_REGION)
+collector = DomainCollector()
+analyzer = GemmaAnalyzer()
+storage = ReportStorage(s3, dynamodb)
+worker = SQSWorker(sqs, collector, analyzer, storage)
+worker.run()
+```
 
-구문 검사와 모듈 가져오기 검사를 수행한다. AWS, DNS, curl, Ollama 호출을 테스트용 응답으로 대체하여 기존 코드와 다음 8가지 상황의 결과 및 호출 순서를 비교한 결과가 모두 일치한다.
+1. `session`은 기존 `dns-project` AWS 프로필을 사용하는 세션이다. 세션은 같은 인증 설정으로 AWS 서비스에 접근할 때 사용하는 객체다.
+2. `sqs`, `dynamodb`, `s3`에는 각각 큐 수신, 항목 갱신, 보고서 저장을 요청할 클라이언트가 들어간다. 리전은 기존 `ap-northeast-2`다.
+3. `collector = DomainCollector()`는 수집 객체를 만든다. 클래스 이름 뒤의 괄호는 해당 클래스로 객체를 생성한다는 뜻이다.
+4. `analyzer = GemmaAnalyzer()`는 분석 객체를 만들고 이 파일 옆의 `.env`를 읽는다. API 키와 모델명은 분석 요청 때 확인한다.
+5. `storage = ReportStorage(s3, dynamodb)`는 저장 객체를 만들면서 사용할 클라이언트를 전달한다. 생성 메서드인 `__init__`가 `self.s3`, `self.dynamodb`에 보관한다. `self`는 현재 객체를 가리킨다.
+6. `worker = SQSWorker(sqs, collector, analyzer, storage)`는 앞서 만든 객체들을 워커에 전달한다. 워커는 전달받은 객체를 속성에 보관하므로 실행 중 새 클라이언트를 만들 필요가 없다.
+7. `worker.run()`은 메시지 하나를 받아 아래 순서로 처리한다.
 
-정상 처리, 메시지 없음, HTTP 재시도, 웹 수집 실패, DNS 조회 실패, DynamoDB 갱신 실패, AI 요청 실패, S3 저장 실패를 검증한다. 실제 AWS 자원과 Ollama를 호출하는 통합 실행은 수행하지 않는다.
+```python
+collected_data = self.collector.collect_data(domain, job_id)
+self.storage.mark_analyzing(domain)
+analysis = self.analyzer.analyze_data(collected_data)
+report_s3_key = self.storage.save_report(domain, job_id, collected_data, analysis)
+```
 
-현재 동작의 한계는 다음과 같다.
+1. 메시지가 `{"domain": "example.com", "job_id": "job-001"}`이면 `domain`에는 `example.com`, `job_id`에는 `job-001`이 들어간다. 수집 결과는 `collected_data` 딕셔너리에 들어가며, 웹 수집 실패로 `None`이 반환되면 SQS 메시지를 삭제하고 분석과 저장 없이 종료한다. 이 경우 DynamoDB 상태는 갱신하지 않는다.
+2. `self.storage.mark_analyzing(domain)`은 기존 DynamoDB 항목의 상태를 `Analyzing`으로 바꾼다. 기존 함수와 달리 매번 클라이언트를 인자로 전달하지 않고 저장 객체에 보관한 클라이언트를 사용한다.
+3. `self.analyzer.analyze_data(collected_data)`는 기존 Gemma API에 수집 자료를 전달한다. 반환된 분석 본문 문자열이 `analysis`에 들어간다. 프롬프트, 300초 제한 시간과 빈 응답 검증을 유지한다.
+4. `self.storage.save_report(...)`는 수집 자료와 분석 결과를 S3에 저장하고 DynamoDB에 보고서 위치를 기록한다. 위 예시의 반환값은 `reports/example.com/job-001.json`이며 `report_s3_key`에 들어간다.
+5. 웹 수집 실패로 `None`이 반환된 경우 외에는 저장 메서드가 정상 반환된 뒤에만 워커가 SQS 메시지를 삭제한다. 수집 중 예외, 상태 갱신, 분석, S3 저장 또는 보고서 위치 갱신에서 오류가 발생하면 예외를 전달하며 메시지를 삭제하지 않는다. SQS 삭제 요청 자체가 실패해도 예외를 전달한다.
 
-- S3 저장 후 DynamoDB에 보고서 위치와 완료 상태를 기록하는 기능은 아직 구현하지 않는다.
-- SQS 메시지 삭제와 표시 제한 시간 연장 기능은 아직 구현하지 않는다. 따라서 재수신이 발생할 수 있다.
-- AI 요청이나 S3 저장이 실패하면 프로그램이 오류로 종료하며, 이미 기록한 `Analyzing` 상태는 유지한다.
-- 수집 대상의 사설 IP 접근 방지와 리다이렉트별 대상 검증은 아직 구현하지 않는다.
+```python
+if __name__ == "__main__":
+  main()
+```
 
-다음 단계는 S3 저장 성공 후 DynamoDB에 보고서 위치와 완료 상태를 기록하는 것이다. 이후 저장 완료를 확인한 작업의 SQS 메시지를 삭제하는 순서로 구현한다.
+`main.py`를 직접 실행하면 `__name__`에 `"__main__"`이 들어가므로 `main()`을 호출한다. 다른 파일에서 가져오면 이 조건이 거짓이므로 AWS 작업을 시작하지 않는다.
+
+## 설정과 기존 동작
+
+| 위치 | 설정 |
+|---|---|
+| `sqs_worker.py` | 기존 AWS 프로필, 리전과 SQS URL을 유지한다. |
+| `storage.py` | 기존 DynamoDB 테이블과 S3 버킷을 유지한다. |
+| `analyzer.py` | 기존 BAZE Gemma API 주소를 유지한다. |
+| `.env` | `BAZE_API_KEY`와 `BAZE_MODEL`을 사용한다. |
+
+수집 코드는 DNS 조회, HTTPS 우선 요청, 지정된 오류에서 HTTP 재시도, 문자 인코딩 처리와 HTML 추출 방식을 유지한다. 저장 보고서의 필드와 경로도 유지한다. `Analyzing` 이후 완료 상태를 기록하거나 SQS 표시 제한 시간을 연장하는 기능은 이번 구조 변경에 포함하지 않는다.
+
+## 로컬 검증 방법
+
+```bash
+.venv/bin/python -B -m unittest discover -s python_file -p 'test_*.py' -v
+```
+
+AWS, DNS, 웹사이트와 Gemma API를 호출하지 않고 테스트용 객체로 처리 순서와 실패 시 메시지 보존을 확인한다. 실제 AWS 자원과 API를 사용하는 통합 실행은 별도 확인이 필요하다.

@@ -17,10 +17,16 @@ async function api(path, options) {
   if (!res.ok) throw new Error(data.error || '조회에 실패했습니다.');
   return data;
 }
+function registrationTime(item) {
+  const time = Date.parse(item.created_at);
+  return Number.isNaN(time) ? -Infinity : time;
+}
 function render() {
   const keyword = $('search').value.trim().toLowerCase();
   const status = $('status').value;
-  const visible = items.filter(item => item.domain?.includes(keyword) && (!status || item.status === status));
+  const visible = items
+    .filter(item => item.domain?.includes(keyword) && (!status || item.status === status))
+    .sort((a, b) => registrationTime(b) - registrationTime(a));
   $('total').textContent = items.length;
   $('processing').textContent = items.filter(x => ['Queued', 'Analyzing', 'pending_enqueue'].includes(x.status)).length;
   $('reviews').textContent = items.filter(x => x.status === 'review').length;
