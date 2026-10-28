@@ -325,6 +325,7 @@ for (const [id, status] of [['allow-domain', 'allow'], ['block-domain', 'blocked
   $(id).addEventListener('click', () => {
     if (!reviewMode || !reviewSnapshot || deciding || listing) return;
     pendingDecision = { domain: reviewDomain, status, expected: { ...reviewSnapshot } };
+    $('confirm-decision').disabled = false;
     const action = status === 'blocked' ? '차단 대상으로 지정' : '허용';
     $('decision-description').textContent = `${reviewDomain}을 ${action}할까요?`;
     $('decision-error').textContent = '';
