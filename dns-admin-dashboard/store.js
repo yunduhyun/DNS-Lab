@@ -1,6 +1,6 @@
 /** DynamoDB 목록과 S3 보고서를 조회하고 선택한 도메인의 기록을 삭제한다. demo 모드는 AWS를 호출하지 않는다. */
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, GetCommand, ScanCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, ScanCommand, DeleteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { S3Client, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 
 export class AppError extends Error {
@@ -56,7 +56,17 @@ export function createStore(env) {
         const item = records.find(row => row.domain === domain);
         if (!item) throw new AppError(404, '등록된 도메인이 없습니다.');
         if (!item.report_s3_key) throw new AppError(409, '보고서 위치가 아직 등록되지 않았습니다.');
-        return demoReport(domain);
+        return { ...demoReport(domain), review_snapshot: Object.fromEntries(snapshotFields.map(field => [field, item[field] ?? null])) };
+      },
+      async decide(domain, status, expected) {
+        if (!['blocked', 'allow'].includes(status)) throw new AppError(400, '차단 또는 허용을 선택해주세요.');
+        const item = records.find(row => row.domain === domain);
+        if (!item) throw new AppError(404, '등록된 도메인이 없습니다.');
+        checkSnapshot(item, expected);
+        if (item.status !== 'review') throw new AppError(409, '검토 대기 항목만 결정할 수 있습니다. 목록을 새로고침해주세요.');
+        item.status = status;
+        item.updated_at = new Date().toISOString();
+        return { item: { ...item } };
       },
       async remove(domain, expected) {
         const item = records.find(row => row.domain === domain);
@@ -115,10 +125,38 @@ export function createStore(env) {
       try { report = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
       catch { throw new AppError(422, '보고서 JSON을 해석할 수 없습니다.'); }
       if (!report || report.domain !== domain || typeof report.analysis !== 'string' ||
-          !report.collected_data || typeof report.collected_data !== 'object' || Array.isArray(report.collected_data)) {
+          (report.collected_data !== null && (typeof report.collected_data !== 'object' || Array.isArray(report.collected_data)))) {
         throw new AppError(422, '보고서 형식이나 도메인이 일치하지 않습니다.');
       }
-      return report;
+      return { ...report, review_snapshot: Object.fromEntries(snapshotFields.map(field => [field, item[field] ?? null])) };
+    },
+    async decide(domain, status, expected) {
+      if (!['blocked', 'allow'].includes(status)) throw new AppError(400, '차단 또는 허용을 선택해주세요.');
+      if (expected.status !== 'review') throw new AppError(409, '검토 대기 항목만 결정할 수 있습니다.');
+      try {
+        const result = await db.send(new UpdateCommand({
+          TableName: env.DYNAMODB_TABLE,
+          Key: { domain },
+          UpdateExpression: 'SET #status = :status, #updated = :updated',
+          ConditionExpression: 'attribute_exists(#domain) AND #status = :review AND #created = :expected_created AND #updated = :expected_updated AND #report = :expected_report',
+          ExpressionAttributeNames: {
+            '#domain': 'domain', '#status': 'status', '#created': 'created_at',
+            '#updated': 'updated_at', '#report': 'report_s3_key'
+          },
+          ExpressionAttributeValues: {
+            ':status': status, ':updated': new Date().toISOString(), ':review': 'review',
+            ':expected_created': expected.created_at, ':expected_updated': expected.updated_at,
+            ':expected_report': expected.report_s3_key
+          },
+          ReturnValues: 'ALL_NEW'
+        }));
+        return { item: result.Attributes };
+      } catch (error) {
+        if (error.name === 'ConditionalCheckFailedException') {
+          throw new AppError(409, '항목이 변경되었습니다. 목록을 새로고침한 뒤 보고서를 다시 확인해주세요.');
+        }
+        throw error;
+      }
     },
     async remove(domain, expected) {
       const { Item: item } = await db.send(new GetCommand({

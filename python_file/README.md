@@ -1,99 +1,109 @@
-# DNS 분석 프로그램 구조 및 실행 안내
+# DNS 분석 작업 파일 안내
 
-## 폴더 구성
+2026년 10월 28일의 로컬 소스 코드를 기준으로 작성한 설명서다. 각 설명서의 예시는 동작 이해를 위한 가상 자료이며 실제 AWS 실행 결과가 아니다.
+
+## 파일 구성과 읽는 순서
 
 ```text
 python_file/
-├── main.py          # 단일 진입점과 객체 생성
-├── sqs_worker.py    # SQSWorker 클래스
-├── collector.py     # DomainCollector 클래스
-├── analyzer.py      # GemmaAnalyzer 클래스
-├── storage.py       # ReportStorage 클래스
-├── test_worker.py   # 외부 호출 없는 처리 순서 검증
-└── .env             # BAZE_API_KEY와 BAZE_MODEL 설정
+├── README.md
+├── analysis_worker/
+│   ├── main.py
+│   ├── main.md
+│   ├── collector.py
+│   ├── collector.md
+│   ├── analyzer.py
+│   ├── analyzer.md
+│   ├── rules.md
+│   └── .env
+└── mcp_tools/
+    ├── browser_mcp_client.py
+    ├── browser_mcp_client.md
+    ├── browser_mcp_server.py
+    └── browser_mcp_server.md
 ```
 
-기존 파일별 역할은 유지하고 함수들을 해당 클래스의 메서드로 옮긴다. 메서드는 객체에 속한 함수다. Python 들여쓰기는 단계마다 공백 2칸을 사용한다.
+1. [main.md](/Users/yunduhyun/Desktop/dns_project/python_file/analysis_worker/main.md)에서 전체 작업 순서, AWS 상태 갱신과 보고서 저장을 확인한다.
+2. [collector.md](/Users/yunduhyun/Desktop/dns_project/python_file/analysis_worker/collector.md)에서 DNS 조회와 HTML 정보 추출을 확인한다.
+3. [analyzer.md](/Users/yunduhyun/Desktop/dns_project/python_file/analysis_worker/analyzer.md)에서 정책 전달, 젬마 호출과 응답 검증을 확인한다.
+4. [browser_mcp_client.md](/Users/yunduhyun/Desktop/dns_project/python_file/mcp_tools/browser_mcp_client.md)에서 로컬 MCP 서버 연결을 확인한다.
+5. [browser_mcp_server.md](/Users/yunduhyun/Desktop/dns_project/python_file/mcp_tools/browser_mcp_server.md)에서 브라우저 접속, 이동 관찰과 결과 분류를 확인한다.
+6. [rules.md](/Users/yunduhyun/Desktop/dns_project/python_file/analysis_worker/rules.md)에서 실제 AI 판단 정책을 확인한다. 이 파일 자체가 정책 문서이므로 별도 사본을 만들지 않는다.
 
-## 실행 방법
+## 현재 실행 흐름
 
-프로젝트 루트에서 터미널 명령을 실행한다.
+```text
+main.py 실행
+  → AWS 클라이언트와 각 객체 준비
+  → SQS 메시지 최대 1개 수신
+  → collector.py에서 DNS 조회와 curl 수집
+  → DynamoDB의 기존 도메인을 Analyzing으로 갱신
+  → analyzer.py에서 젬마 1회 호출
+  → needs_investigation이 true이면 MCP 클라이언트 실행
+      → 로컬 MCP 서버 실행과 investigate_url 도구 호출
+      → Playwright로 접속하고 관찰 결과 반환
+      → collected_data에 mcp_investigation 추가
+  → 최초 AI 보고서와 수집 자료를 S3에 저장
+  → DynamoDB에 S3 객체 키 기록
+  → SQS 메시지 삭제 후 종료
+```
+
+- SQS에 메시지가 없으면 최대 20초 기다린 뒤 종료한다. 반복해서 큐를 읽는 무한 반복문은 없다.
+- collector가 `None`을 반환하면 현재 코드는 해당 메시지를 삭제하고 종료한다. 이 경로에서는 AI 호출과 보고서 저장을 하지 않는다.
+- 수집 자료가 존재하는 경로에서는 분석, MCP 호출 또는 저장 중 예외가 발생하면 이후 단계로 진행하지 않는다.
+- MCP 호출은 Python worker가 수행한다. 젬마는 JSON 응답으로 추가 조사 필요 여부와 URL을 제시한다.
+
+## 구현된 범위와 남은 연결
+
+- DNS의 A, AAAA, CNAME과 정적 HTML 정보 수집을 구현한 상태다.
+- HTTP 리다이렉션은 collector의 `curl -L`도 따라간다. JavaScript 실행과 브라우저를 이용한 최종 페이지 관찰은 MCP 서버가 담당한다.
+- 젬마가 추가 조사를 요청하면 MCP를 최대 한 번 호출하고 결과를 저장한다.
+- analyzer에는 MCP 결과가 입력에 포함된 경우 최종 판단을 요청하는 지시문이 있다. 다만 현재 main은 MCP 이후 analyzer를 다시 호출하지 않는다. 따라서 현재 저장되는 `analysis`는 최초 AI 보고서다.
+- FlareSolverr의 별도 성공 사례를 확인했으나 이 설명 대상 코드에는 연동되어 있지 않다.
+- `needs_human_review`는 MCP 결과의 표시값이다. 관리자 작업 생성, 알림과 검토 화면 연결은 구현되어 있지 않다.
+- AI의 `block` 판정은 분석 결과다. RPZ 파일 수정과 DNS 서버 반영은 이 코드에 구현되어 있지 않다.
+- DynamoDB의 분석 완료 상태 갱신도 아직 없다. 현재 코드는 `Analyzing`과 보고서 위치를 기록한다.
+
+## worker 실행
 
 ```bash
 cd /Users/yunduhyun/Desktop/dns_project
-.venv/bin/python python_file/main.py
+source .venv/bin/activate
+cd python_file/analysis_worker
+python main.py
 ```
 
-진입점은 `main.py`다. 기존 `sqs_worker.py`는 클래스 정의를 제공하며 직접 실행해도 작업을 시작하지 않는다. 실행 한 번에 메시지 하나만 처리하고 종료한다. 메시지가 없으면 최대 20초 동안 기다린 뒤 종료한다.
+1. 첫 명령은 프로젝트 최상위 폴더로 이동한다.
+2. `source`는 현재 셸에 가상환경 설정을 적용한다. 이후 `python`은 해당 가상환경의 Python을 사용한다.
+3. 다음 명령은 실행 파일이 있는 폴더로 이동한다.
+4. 마지막 명령은 SQS 메시지 하나를 실제로 처리한다. AWS 조회와 쓰기, 외부 사이트 수집 및 유료 AI 요청이 발생할 수 있다.
 
-## 실행 순서와 코드 변경
+환경 구성은 다음 위치를 기준으로 확인한다.
 
-기존 진입점의 주요 호출은 다음과 같다.
+- AWS 프로필 이름은 `dns-project`이며 리전은 `ap-northeast-2`다. 큐, 테이블과 버킷 설정은 [main.py](/Users/yunduhyun/Desktop/dns_project/python_file/analysis_worker/main.py)에 있다.
+- `BAZE_API_KEY`와 `BAZE_MODEL`은 analyzer와 같은 폴더의 `.env` 또는 환경변수로 설정한다. 이 설명서는 실제 설정값을 포함하지 않는다.
+- `rules.md`는 analyzer와 같은 폴더에서 읽는다.
+- collector는 Python 패키지 `dnspython`, `beautifulsoup4`와 시스템의 `curl`을 사용한다.
+- worker와 analyzer는 `boto3`, `python-dotenv`를 사용한다.
+- MCP는 `mcp`, `playwright`, `playwright-stealth`와 설치된 Google Chrome을 사용한다. 현재 서버는 `channel="chrome"`을 지정한다.
 
-```python
-collected_data = collect_data(domain, job_id)
-mark_analyzing(dynamodb, domain)
-analysis = analyze_data(collected_data)
-report_s3_key = save_report(s3, dynamodb, domain, job_id, collected_data, analysis)
-```
-
-새 진입점은 다음 순서로 객체를 생성한다.
-
-```python
-session = boto3.Session(profile_name=AWS_PROFILE)
-sqs = session.client("sqs", region_name=AWS_REGION)
-dynamodb = session.client("dynamodb", region_name=AWS_REGION)
-s3 = session.client("s3", region_name=AWS_REGION)
-collector = DomainCollector()
-analyzer = GemmaAnalyzer()
-storage = ReportStorage(s3, dynamodb)
-worker = SQSWorker(sqs, collector, analyzer, storage)
-worker.run()
-```
-
-1. `session`은 기존 `dns-project` AWS 프로필을 사용하는 세션이다. 세션은 같은 인증 설정으로 AWS 서비스에 접근할 때 사용하는 객체다.
-2. `sqs`, `dynamodb`, `s3`에는 각각 큐 수신, 항목 갱신, 보고서 저장을 요청할 클라이언트가 들어간다. 리전은 기존 `ap-northeast-2`다.
-3. `collector = DomainCollector()`는 수집 객체를 만든다. 클래스 이름 뒤의 괄호는 해당 클래스로 객체를 생성한다는 뜻이다.
-4. `analyzer = GemmaAnalyzer()`는 분석 객체를 만들고 이 파일 옆의 `.env`를 읽는다. API 키와 모델명은 분석 요청 때 확인한다.
-5. `storage = ReportStorage(s3, dynamodb)`는 저장 객체를 만들면서 사용할 클라이언트를 전달한다. 생성 메서드인 `__init__`가 `self.s3`, `self.dynamodb`에 보관한다. `self`는 현재 객체를 가리킨다.
-6. `worker = SQSWorker(sqs, collector, analyzer, storage)`는 앞서 만든 객체들을 워커에 전달한다. 워커는 전달받은 객체를 속성에 보관하므로 실행 중 새 클라이언트를 만들 필요가 없다.
-7. `worker.run()`은 메시지 하나를 받아 아래 순서로 처리한다.
-
-```python
-collected_data = self.collector.collect_data(domain, job_id)
-self.storage.mark_analyzing(domain)
-analysis = self.analyzer.analyze_data(collected_data)
-report_s3_key = self.storage.save_report(domain, job_id, collected_data, analysis)
-```
-
-1. 메시지가 `{"domain": "example.com", "job_id": "job-001"}`이면 `domain`에는 `example.com`, `job_id`에는 `job-001`이 들어간다. 수집 결과는 `collected_data` 딕셔너리에 들어가며, 웹 수집 실패로 `None`이 반환되면 SQS 메시지를 삭제하고 분석과 저장 없이 종료한다. 이 경우 DynamoDB 상태는 갱신하지 않는다.
-2. `self.storage.mark_analyzing(domain)`은 기존 DynamoDB 항목의 상태를 `Analyzing`으로 바꾼다. 기존 함수와 달리 매번 클라이언트를 인자로 전달하지 않고 저장 객체에 보관한 클라이언트를 사용한다.
-3. `self.analyzer.analyze_data(collected_data)`는 기존 Gemma API에 수집 자료를 전달한다. 반환된 분석 본문 문자열이 `analysis`에 들어간다. 프롬프트, 300초 제한 시간과 빈 응답 검증을 유지한다.
-4. `self.storage.save_report(...)`는 수집 자료와 분석 결과를 S3에 저장하고 DynamoDB에 보고서 위치를 기록한다. 위 예시의 반환값은 `reports/example.com/job-001.json`이며 `report_s3_key`에 들어간다.
-5. 웹 수집 실패로 `None`이 반환된 경우 외에는 저장 메서드가 정상 반환된 뒤에만 워커가 SQS 메시지를 삭제한다. 수집 중 예외, 상태 갱신, 분석, S3 저장 또는 보고서 위치 갱신에서 오류가 발생하면 예외를 전달하며 메시지를 삭제하지 않는다. SQS 삭제 요청 자체가 실패해도 예외를 전달한다.
-
-```python
-if __name__ == "__main__":
-  main()
-```
-
-`main.py`를 직접 실행하면 `__name__`에 `"__main__"`이 들어가므로 `main()`을 호출한다. 다른 파일에서 가져오면 이 조건이 거짓이므로 AWS 작업을 시작하지 않는다.
-
-## 설정과 기존 동작
-
-| 위치 | 설정 |
-|---|---|
-| `sqs_worker.py` | 기존 AWS 프로필, 리전과 SQS URL을 유지한다. |
-| `storage.py` | 기존 DynamoDB 테이블과 S3 버킷을 유지한다. |
-| `analyzer.py` | 기존 BAZE Gemma API 주소를 유지한다. |
-| `.env` | `BAZE_API_KEY`와 `BAZE_MODEL`을 사용한다. |
-
-수집 코드는 DNS 조회, HTTPS 우선 요청, 지정된 오류에서 HTTP 재시도, 문자 인코딩 처리와 HTML 추출 방식을 유지한다. 저장 보고서의 필드와 경로도 유지한다. `Analyzing` 이후 완료 상태를 기록하거나 SQS 표시 제한 시간을 연장하는 기능은 이번 구조 변경에 포함하지 않는다.
-
-## 로컬 검증 방법
+## MCP만 따로 확인
 
 ```bash
-.venv/bin/python -B -m unittest discover -s python_file -p 'test_*.py' -v
+/Users/yunduhyun/Desktop/dns_project/.venv/bin/python \
+  /Users/yunduhyun/Desktop/dns_project/python_file/mcp_tools/browser_mcp_client.py \
+  https://example.com/
 ```
 
-AWS, DNS, 웹사이트와 Gemma API를 호출하지 않고 테스트용 객체로 처리 순서와 실패 시 메시지 보존을 확인한다. 실제 AWS 자원과 API를 사용하는 통합 실행은 별도 확인이 필요하다.
+- 가상환경의 Python 경로를 직접 지정하므로 현재 폴더와 관계없이 실행한다.
+- `example.com`은 호출 형식 설명용 주소다. 실행하면 해당 주소에 실제 브라우저 접속을 수행한다.
+- 클라이언트가 서버를 실행하므로 서버를 별도 터미널에서 미리 실행할 필요가 없다.
+- 출력의 `status`와 `reason`, `final_url`, `title`, `body_text`를 함께 확인한다. 수집 성공 여부와 사이트 유해성 판정은 별개다.
+
+## 문서 갱신 기준
+
+- main의 처리 순서나 AWS 저장 형식을 바꾸면 main 설명서와 이 안내서의 실행 흐름을 갱신한다.
+- 수집 필드를 바꾸면 collector 설명서와 판단 정책의 확인 필드를 함께 검토한다.
+- AI 응답 구조를 바꾸면 analyzer의 검증과 main의 사용 부분을 함께 확인한다.
+- MCP 인자나 결과 상태를 바꾸면 클라이언트와 서버 설명서를 함께 갱신한다.
+- 이번 작업은 문서 작성이며 외부 서비스의 현재 연결 상태나 배포 상태를 검증하지 않는다.

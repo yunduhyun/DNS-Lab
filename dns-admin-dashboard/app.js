@@ -1,5 +1,6 @@
 /** 관리자 인증, 정적 화면 제공, 조회 및 삭제 API와 오류 응답을 담당한다. */
 import express from 'express';
+import { domainToASCII } from 'node:url';
 import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
 import { createHash, timingSafeEqual } from 'node:crypto';
@@ -9,7 +10,7 @@ import { renderAnalysis } from './markdown.js';
 
 const digest = value => createHash('sha256').update(value).digest();
 const validDomain = value => typeof value === 'string' && value.length <= 253 &&
-  /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(value);
+  /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(domainToASCII(value)) && !/[\s/@:#?\\]/.test(value);
 
 export function createApp({ store, username, password }) {
   if (!username || username.includes(':') || !password || password.length < 12) {
@@ -49,6 +50,21 @@ export function createApp({ store, username, password }) {
     const report = await store.report(req.query.domain);
     res.json({ ...report, analysis_html: renderAnalysis(report.analysis) });
   });
+  app.patch('/api/decision', express.json({ limit: '4kb' }), async (req, res) => {
+    if (req.get('X-Requested-With') !== 'DNSAdmin' || req.get('Sec-Fetch-Site') === 'cross-site') {
+      throw new AppError(403, '대시보드에서 검토 결정을 요청해주세요.');
+    }
+    const { domain, status, expected } = req.body || {};
+    if (!validDomain(domain) || !['blocked', 'allow'].includes(status)) {
+      throw new AppError(400, '도메인과 차단 또는 허용 결정을 확인해주세요.');
+    }
+    const fields = ['status', 'created_at', 'updated_at', 'report_s3_key'];
+    if (!expected || !fields.every(field => typeof expected[field] === 'string' && expected[field].length > 0 && expected[field].length <= 2048)) {
+      throw new AppError(400, '검토 대상 정보가 올바르지 않습니다. 보고서를 다시 확인해주세요.');
+    }
+    if (expected.status !== 'review') throw new AppError(409, '검토 대기 항목만 결정할 수 있습니다.');
+    res.json(await store.decide(domain, status, expected));
+  });
   app.delete('/api/domains', express.json({ limit: '4kb' }), async (req, res) => {
     // 브라우저의 교차 출처 요청은 사용자 정의 헤더가 있는 DELETE 요청을 전송할 수 없다.
     if (req.get('X-Requested-With') !== 'DNSAdmin' || req.get('Sec-Fetch-Site') === 'cross-site') {
@@ -69,7 +85,7 @@ export function createApp({ store, username, password }) {
   app.use((req, res) => res.status(404).json({ error: '요청한 경로가 없습니다.' }));
   app.use((error, req, res, next) => {
     if (error.type === 'entity.parse.failed' || error.type === 'entity.too.large') {
-      return res.status(400).json({ error: '삭제 요청 본문이 올바르지 않습니다.' });
+      return res.status(400).json({ error: '요청 본문이 올바르지 않습니다.' });
     }
     if (!(error instanceof AppError)) console.error('요청 오류:', error.name);
     res.status(error instanceof AppError ? error.status : 502).json({

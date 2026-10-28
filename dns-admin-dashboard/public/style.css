@@ -193,3 +193,54 @@ summary { color: var(--muted); cursor: pointer; font-size: 12px; }
 #delete-confirmation { width: 100%; padding: 11px; border: 1px solid var(--border); border-radius: 4px; }
 #delete-error { color: var(--text); white-space: pre-wrap; font-size: 13px; line-height: 1.7; }
 #confirm-delete { display: block; margin-left: auto; }
+
+/* 검토 목록과 보고서는 넓은 화면에서 각각 스크롤한다. */
+:root { --danger: #ac3434; --danger-soft: #fff1f0; }
+html { scrollbar-gutter: stable; scrollbar-color: #b9b3c1 var(--surface-soft); scrollbar-width: thin; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: #b9b3c1; border: 2px solid var(--surface-soft); border-radius: 6px; }
+button:disabled { cursor: not-allowed; }
+.badge.allow { color: var(--green-dark); background: var(--green-soft); }
+.badge.blocked { color: var(--danger); background: var(--danger-soft); }
+.review-workspace { display: grid; grid-template-columns: minmax(240px, 310px) minmax(0, 1fr); gap: 20px; align-items: start; }
+.review-list-panel { max-height: calc(100dvh - 60px); position: sticky; top: 24px; overflow: auto; }
+.review-list-panel .filters { display: block; }
+.review-list-panel .filters input { width: 100%; }
+.review-rows { padding: 0 10px 12px; }
+.review-item { display: flex; flex-direction: column; gap: 9px; width: 100%; padding: 17px 12px; text-align: left; border: 1px solid transparent; border-bottom-color: var(--border); background: var(--surface); color: var(--text); border-radius: 4px; }
+.review-item:hover { background: var(--surface-soft); }
+.review-item[aria-pressed="true"] { background: var(--lavender-soft); border-color: var(--lavender); box-shadow: inset 3px 0 var(--green); }
+.review-item strong { overflow-wrap: anywhere; font: 600 14px ui-monospace, monospace; }
+.review-item span { font-size: 11px; color: var(--muted); line-height: 1.5; }
+.review-empty { color: var(--muted); padding: 16px 10px; line-height: 1.8; }
+.review-more { margin: 0 20px 20px; }
+.review-report-panel { min-width: 0; }
+.review-report-panel .panel-title h2 { overflow-wrap: anywhere; }
+.review-detail { min-height: 320px; max-height: 65dvh; overflow: auto; scroll-padding: 20px; }
+.review-detail .report-content { padding: 24px; }
+.review-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 24px; border-top: 1px solid var(--border); background: var(--surface); }
+.review-actions p { margin: 0; font-size: 12px; line-height: 1.8; color: var(--muted); }
+.review-actions > div { display: flex; gap: 12px; flex-shrink: 0; }
+.review-actions button, #confirm-decision { min-width: 80px; min-height: 44px; }
+.danger-button { background: var(--danger); border-color: var(--danger); color: white; }
+.danger-button:hover { background: var(--danger); border-color: var(--danger); filter: brightness(.92); }
+.review-notice { color: var(--green-dark); line-height: 1.8; font-size: 13px; }
+#decision-modal { width: min(520px, calc(100vw - 32px)); max-height: 90dvh; overflow: auto; padding: 0; border: 1px solid var(--border); border-radius: 8px; color: var(--text); }
+#decision-modal::backdrop { background: #25232b70; }
+.decision-content { padding: 24px; line-height: 1.8; overflow-wrap: anywhere; }
+#confirm-decision { display: block; margin-left: auto; }
+#decision-error { color: var(--danger); }
+@media (max-width: 1000px) {
+  .review-workspace { grid-template-columns: 1fr; }
+  .review-list-panel { position: static; max-height: 320px; }
+  .review-detail { max-height: none; }
+  .review-actions { position: fixed; bottom: 0; left: 176px; right: 0; z-index: 5; flex-wrap: wrap; box-shadow: 0 -4px 16px #24212b0c; }
+  .review-report-panel { padding-bottom: 150px; }
+  html { scroll-padding-bottom: 170px; }
+  .review-report-panel { overflow: visible; }
+}
+@media (max-width: 640px) {
+  .review-actions { left: 0; padding: 16px; }
+  .review-actions > div { width: 100%; justify-content: flex-end; }
+  .review-detail .report-content { padding: 16px; }
+}

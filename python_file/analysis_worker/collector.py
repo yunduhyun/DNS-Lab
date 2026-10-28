@@ -23,6 +23,19 @@ class DomainCollector:
   def collect_data(self, domain, job_id):
     """도메인을 분석하여 AI 판정에 필요한 웹 데이터를 딕셔너리로 반환한다."""
 
+    # 화면과 보고서에 표시할 유니코드 도메인을 준비한다.
+    domain_unicode = domain
+
+    try:
+      domain_bytes = domain.encode("ascii")
+      domain_unicode = domain_bytes.decode("idna")
+    except UnicodeError:
+      domain_unicode = domain
+      
+    # DNS 조회와 웹 접속에 사용할 도메인을 ASCII 표기로 변환한다.
+    domain_bytes = domain.encode("idna")
+    domain = domain_bytes.decode("ascii")
+
     # 1. DNS 레코드 조회 (IPv4, IPv6, CNAME)
     dns_data = {}
     record_types = ["A", "AAAA", "CNAME"]
@@ -128,7 +141,7 @@ class DomainCollector:
           meta_name = meta_name.strip()
 
           meta_property = meta_tag.get("property", "")
-          meta_property = meta_name.strip()
+          meta_property = meta_property.strip()
 
           meta_http_equiv = meta_tag.get("http-equiv", "")
           meta_http_equiv = meta_http_equiv.strip()
@@ -175,6 +188,36 @@ class DomainCollector:
           base_href = base_tag["href"]
           base_href = base_href.strip()
           base_url = urljoin(final_url, base_href)
+
+        frames = []
+        frame_tags = soup.find_all(["iframe", "frame"])
+
+        for frame_tag in frame_tags:
+          frame_type = frame_tag.name
+
+          frame_src = frame_tag.get("src", "")
+          frame_src = frame_src.strip()
+
+          frame_title = frame_tag.get("title", "")
+          frame_title = frame_title.strip()
+
+          # has_attr은 해당 속성이 있는지 확인하는 함수이다. 
+          has_srcdoc = frame_tag.has_attr("srcdoc")
+
+          if frame_src:
+            frame_url = urljoin(base_url, frame_src)
+          else:
+            frame_url = ""
+
+          frame_data = {
+            "tag": frame_type,
+            "src": frame_src,
+            "url": frame_url,
+            "title": frame_title,
+            "has_srcdoc": has_srcdoc
+          }
+        
+          frames.append(frame_data)
 
         # 6. 하이퍼링크(<a>) 추출
         links = []
@@ -236,6 +279,7 @@ class DomainCollector:
 
         collected_data = {
           "domain": domain,
+          "domain_unicode": domain_unicode,
           "job_id": job_id,
           "dns": dns_data,
           "requested_url": url,
@@ -246,6 +290,7 @@ class DomainCollector:
           "script_urls": script_urls,
           "links": links,
           "forms": forms,
+          "frames": frames,
           "body_text": body_text
         }
 

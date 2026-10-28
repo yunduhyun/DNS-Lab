@@ -6,7 +6,8 @@
       "Action": [
         "dynamodb:Scan",
         "dynamodb:GetItem",
-        "dynamodb:DeleteItem"
+        "dynamodb:DeleteItem",
+        "dynamodb:UpdateItem"
       ],
       "Resource": "arn:aws:dynamodb:ap-northeast-2:994899741506:table/dns-domain-analysis"
     },

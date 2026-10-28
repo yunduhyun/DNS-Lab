@@ -1,1 +1,4 @@
 .env
+
+# 조사 전용 쿠키와 브라우저 데이터를 Git에서 제외한다.
+python_file/mcp_tools/.browser_profiles/

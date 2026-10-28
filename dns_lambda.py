@@ -1,12 +1,15 @@
 import base64
+import csv
 import gzip
-import json
-import re
-import boto3
-import os
 import hashlib
-
+import io  # s3에서 받은 문자열을 파일처럼 읽게 해줌
+import json
+import os
+import re
+import time
 from datetime import datetime, timezone
+
+import boto3
 from botocore.exceptions import ClientError
 
 dynamodb = boto3.resource("dynamodb")
@@ -14,6 +17,94 @@ table = dynamodb.Table("dns-domain-analysis")
 
 sqs = boto3.client("sqs")
 queue_url = os.environ["SQS_QUEUE_URL"]
+
+s3 = boto3.client("s3")
+
+list_bucket = os.environ["DOMAIN_LIST_BUCKET"]
+
+blocklist_key = os.environ["BLOCKLIST_KEY"]
+allowlist_key = os.environ["ALLOWLIST_KEY"]
+
+# 도메인을 보관할 집합 생성 
+blocklist_cache = set()
+allowlist_cache = set()
+
+# 아직 목록을 읽지 않았다는 표시
+cache_loaded_at = None
+cache_refresh_seconds = 3600
+
+# key에는 s3 버킷 안의 파일 경로를 받는다
+def load_domain_csv(key):
+    response = s3.get_object(
+        Bucket=list_bucket,
+        Key=key
+    )
+
+    body = response["Body"]
+
+    try:
+        csv_bytes = body.read()
+    finally:
+        body.close()
+
+
+    csv_text = csv_bytes.decode("utf-8-sig")
+    # io.StringIO는 문자열을 메모리 안에서 파일처럼 읽을 수 있는 객체로 만들어줌
+    csv_file = io.StringIO(csv_text)
+
+    # 첫 줄을 열 이름으로 사용하고 각 행을 딕셔너리로 읽는다 
+    # domain      
+    # naver.com            {"domain": "naver.com"}
+    # GOOGLE.COM.  ---->   {"domain": "GOOGLE.COM."}
+    # naver.com            {"domain": "naver.com"}
+    reader = csv.DictReader(csv_file)
+    print(f"CSV 헤더 확인: {reader.fieldnames!r}")
+
+    if reader.fieldnames != ["domain"]:
+        raise ValueError(f"CSV에 domain 열 하나가 필요합니다: {key}")
+
+    domains = set()
+
+    for row in reader:
+        domain = row["domain"].strip().lower().rstrip(".")
+
+        if not domain:
+            continue
+
+        domains.add(domain)
+
+    if not domains:
+        raise ValueError(f"도메인 목록이 비어 있습니다: {key}")
+
+    # 완성된 집합을 호출한 곳에 돌려줌
+    return domains
+
+def refresh_domain_cache():
+    global blocklist_cache
+    global allowlist_cache
+    global cache_loaded_at
+
+    # monotonic은 경과 시간을 계산하는 시계이다. 
+    now = time.monotonic()
+
+    if cache_loaded_at is not None:
+        elapsed_seconds = now - cache_loaded_at
+
+        if elapsed_seconds < cache_refresh_seconds:
+            return
+
+    new_blocklist = load_domain_csv(blocklist_key)
+    new_allowlist = load_domain_csv(allowlist_key)
+
+    blocklist_cache = new_blocklist
+    allowlist_cache = new_allowlist
+    cache_loaded_at = time.monotonic()
+
+    print(
+        f"캐시 로딩 완료: "
+        f"차단 {len(blocklist_cache):,}개, "
+        f"허용 {len(allowlist_cache):,}개"
+    )
 
 def enqueue_pending(domain):
     # enqueue_pending 상태인 항목을 sqs에 전송하는 로직
@@ -105,9 +196,36 @@ def lambda_handler(event, context):
       # 도메인 정규화 
       domain = match.group(1).lower().strip(".")
       domains.add(domain)
-  
-  # dynamodb 조회를 통해 이미 등록된 도메인인지 확인
+
+  if not domains:
+    return {"status": "ok"}
+
+  refresh_domain_cache()
+  analysis_domains = set()
+
   for domain in sorted(domains):
+    if domain in blocklist_cache:
+      print(f"차단 목록에 있어 분석 생략 : {domain}")
+      continue
+
+    if domain in allowlist_cache:
+      print(f"허용목록에 있어 분석 생략 : {domain}")
+      continue
+
+    # DynamoDB와 SQS에서 사용할 도메인을 읽을 수 있는 표기로 변환한다.
+    domain_unicode = domain
+
+    try:
+      domain_bytes = domain.encode("ascii")
+      domain_unicode = domain_bytes.decode("idna")
+    except UnicodeError:
+      domain_unicode = domain
+
+    analysis_domains.add(domain_unicode)
+    
+
+  # dynamodb 조회를 통해 이미 등록된 도메인인지 확인
+  for domain in sorted(analysis_domains):
     # get_item은 키가 일치하는 항목 하나를 찾아낸다. 항목이 없다면 응답에 Item이 포함되지 않는다.
     # ConsistentRead=True는 조회 시점에 앞서 완료된 쓰기를 반영하도록 하는 설정이다. 
     response = table.get_item(
@@ -132,7 +250,7 @@ def lambda_handler(event, context):
           # #domain은 속성 이름 domain을 대신하는 별칭이다. 
           ConditionExpression="attribute_not_exists(#domain)",
           ExpressionAttributeNames = {
-            "#domain" : "damain"
+            "#domain" : "domain"
           }
         )
         print(f"신규 도메인 등록 완료: {domain}")
@@ -144,7 +262,7 @@ def lambda_handler(event, context):
         else:
           raise
 
-  for domain in sorted(domains):
+  for domain in sorted(analysis_domains):
     enqueue_pending(domain)
 
   return {"status":"ok"}

@@ -13,15 +13,38 @@
     <section class="heading"><h1>도메인 현황</h1><button id="refresh" class="button">새로고침</button></section>
     <div class="notice" id="mode" role="status">불러오는 중</div>
     <section class="stats" aria-label="불러온 목록 요약"><div><span>불러온 도메인</span><strong id="total">—</strong></div><div><span>분석 대기 및 진행</span><strong id="processing">—</strong></div><div><span>검토 대기</span><strong id="reviews">—</strong></div><div><span>보고서 등록</span><strong id="reports">—</strong></div></section>
-    <section class="workspace domain-list">
-      <div class="panel list-panel"><div class="panel-title"><h2>관찰 도메인</h2><span id="count">0개</span></div><div class="filters"><label><span class="sr-only">불러온 도메인 검색</span><input id="search" type="search" placeholder="도메인 검색"></label><label><span class="sr-only">상태 필터</span><select id="status"><option value="">전체 상태</option><option value="Queued">분석 대기</option><option value="pending_enqueue">전송 대기</option><option value="Analyzing">분석 중</option><option value="review">검토 대기</option><option value="no_block">차단하지 않음</option><option value="block_pending">차단 반영 대기</option><option value="blocked">차단 적용 완료</option><option value="failed">처리 실패</option></select></label></div>
-        <p class="hint">불러온 목록을 등록 시각 최신순으로 표시합니다. 검색 및 집계도 불러온 목록 기준입니다.</p><div id="list-message" class="message" role="status"></div><div class="table-scroll"><table><thead><tr><th>domain</th><th aria-sort="descending">created_at <span class="column-note">KST 최신순</span></th><th>report_s3_key</th><th>status</th><th>updated_at <span class="column-note">KST</span></th><th>보고서</th><th>삭제</th></tr></thead><tbody id="rows"></tbody></table></div><div class="list-footer"><button id="more" class="button" hidden>더 불러오기</button></div>
+    <div id="list-message" class="message" role="status"></div>
+    <section class="workspace domain-list" id="overview-workspace">
+      <div class="panel list-panel"><div class="panel-title"><h2>관찰 도메인</h2><span id="count">0개</span></div><div class="filters"><label><span class="sr-only">불러온 도메인 검색</span><input id="search" type="search" placeholder="도메인 검색"></label><label><span class="sr-only">상태 필터</span><select id="status"><option value="">전체 상태</option><option value="Queued">분석 대기</option><option value="pending_enqueue">전송 대기</option><option value="Analyzing">분석 중</option><option value="review">검토 대기</option><option value="allow">허용</option><option value="block_pending">차단 반영 대기</option><option value="blocked">차단 대상</option><option value="failed">처리 실패</option></select></label></div>
+        <p class="hint">불러온 목록을 등록 시각 최신순으로 표시합니다. 검색 및 집계도 불러온 목록 기준입니다.</p><div class="table-scroll"><table><thead><tr><th>domain</th><th aria-sort="descending">created_at <span class="column-note">KST 최신순</span></th><th>report_s3_key</th><th>status</th><th>updated_at <span class="column-note">KST</span></th><th>보고서</th><th>삭제</th></tr></thead><tbody id="rows"></tbody></table></div><div class="list-footer"><button id="more" class="button" hidden>더 불러오기</button></div>
       </div>
     </section>
+    <section id="review-workspace" class="review-workspace" hidden aria-label="도메인 검토">
+      <div class="panel review-list-panel">
+        <div class="panel-title"><h2>검토 대기</h2><span id="review-count">0개</span></div>
+        <div class="filters"><label for="review-search" class="sr-only">검토 도메인 검색</label><input id="review-search" type="search" placeholder="검토 도메인 검색"></div>
+        <p class="hint">불러온 목록 중 검토 대기 항목입니다. 등록 시각 최신순으로 표시합니다.</p>
+        <div id="review-rows" class="review-rows" aria-label="검토할 도메인"></div>
+        <button id="review-more" class="button review-more" hidden>더 불러오기</button>
+      </div>
+      <section class="panel review-report-panel" aria-labelledby="review-title">
+        <div class="panel-title"><h2 id="review-title">분석 보고서</h2><span>관리자 검토</span></div>
+        <div id="review-detail" class="review-detail" aria-live="polite"><p class="report-content">검토할 도메인을 선택해주세요.</p></div>
+        <div class="review-actions">
+          <p id="review-message" role="status">보고서를 확인한 뒤 차단 또는 허용을 결정해주세요.</p>
+          <div><button id="allow-domain" class="button" disabled>허용</button><button id="block-domain" class="button danger-button" disabled>차단</button></div>
+        </div>
+      </section>
+    </section>
+    <p id="review-notice" class="review-notice" role="status" hidden></p>
   </main>
   <dialog id="report-modal" aria-labelledby="modal-title">
     <div class="modal-heading"><h2 id="modal-title">분석 보고서</h2><button id="close-report" class="button" aria-label="보고서 닫기" autofocus>닫기</button></div>
     <div id="detail" aria-live="polite"></div>
+  </dialog>
+  <dialog id="decision-modal" aria-labelledby="decision-title" aria-describedby="decision-description">
+    <div class="modal-heading"><h2 id="decision-title">검토 결정 확인</h2><button id="cancel-decision" class="button">취소</button></div>
+    <div class="decision-content"><p id="decision-description"></p><p id="decision-error" role="alert"></p><button id="confirm-decision" class="button" autofocus>결정 저장</button></div>
   </dialog>
   <dialog id="delete-modal" aria-labelledby="delete-title" aria-describedby="delete-description">
     <form id="delete-form">
