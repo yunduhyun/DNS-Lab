@@ -28,12 +28,12 @@
         <button id="review-more" class="button review-more" hidden>더 불러오기</button>
       </div>
       <section class="panel review-report-panel" aria-labelledby="review-title">
-        <div class="panel-title"><h2 id="review-title">분석 보고서</h2><span>관리자 검토</span></div>
-        <div id="review-detail" class="review-detail" aria-live="polite"><p class="report-content">검토할 도메인을 선택해주세요.</p></div>
-        <div class="review-actions">
-          <p id="review-message" role="status">보고서를 확인한 뒤 차단 또는 허용을 결정해주세요.</p>
-          <div><button id="allow-domain" class="button" disabled>허용</button><button id="block-domain" class="button danger-button" disabled>차단</button></div>
+        <div class="panel-title review-header">
+          <h2 id="review-title">분석 보고서</h2>
+          <div class="review-actions"><button id="allow-domain" class="button" disabled>허용</button><button id="block-domain" class="button danger-button" disabled>차단</button></div>
         </div>
+        <p id="review-message" class="review-message" role="status">보고서를 확인한 뒤 차단 또는 허용을 결정해주세요.</p>
+        <div id="review-detail" class="review-detail" aria-live="polite"><p class="report-content">검토할 도메인을 선택해주세요.</p></div>
       </section>
     </section>
     <p id="review-notice" class="review-notice" role="status" hidden></p>

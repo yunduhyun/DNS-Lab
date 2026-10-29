@@ -214,13 +214,14 @@ button:disabled { cursor: not-allowed; }
 .review-item span { font-size: 11px; color: var(--muted); line-height: 1.5; }
 .review-empty { color: var(--muted); padding: 16px 10px; line-height: 1.8; }
 .review-more { margin: 0 20px 20px; }
-.review-report-panel { min-width: 0; }
+.review-report-panel { min-width: 0; overflow: clip; }
+.review-header { position: sticky; top: 0; z-index: 2; gap: 16px; }
+.review-header h2 { min-width: 0; flex: 1; }
 .review-report-panel .panel-title h2 { overflow-wrap: anywhere; }
 .review-detail { min-height: 320px; max-height: 65dvh; overflow: auto; scroll-padding: 20px; }
 .review-detail .report-content { padding: 24px; }
-.review-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 24px; border-top: 1px solid var(--border); background: var(--surface); }
-.review-actions p { margin: 0; font-size: 12px; line-height: 1.8; color: var(--muted); }
-.review-actions > div { display: flex; gap: 12px; flex-shrink: 0; }
+.review-actions { display: flex; gap: 12px; flex-shrink: 0; }
+.review-message { margin: 0; padding: 12px 24px; border-bottom: 1px solid var(--border); font-size: 12px; line-height: 1.8; color: var(--muted); }
 .review-actions button, #confirm-decision { min-width: 80px; min-height: 44px; }
 .danger-button { background: var(--danger); border-color: var(--danger); color: white; }
 .danger-button:hover { background: var(--danger); border-color: var(--danger); filter: brightness(.92); }
@@ -234,13 +235,12 @@ button:disabled { cursor: not-allowed; }
   .review-workspace { grid-template-columns: 1fr; }
   .review-list-panel { position: static; max-height: 320px; }
   .review-detail { max-height: none; }
-  .review-actions { position: fixed; bottom: 0; left: 176px; right: 0; z-index: 5; flex-wrap: wrap; box-shadow: 0 -4px 16px #24212b0c; }
-  .review-report-panel { padding-bottom: 150px; }
-  html { scroll-padding-bottom: 170px; }
   .review-report-panel { overflow: visible; }
 }
 @media (max-width: 640px) {
-  .review-actions { left: 0; padding: 16px; }
-  .review-actions > div { width: 100%; justify-content: flex-end; }
+  .review-header { flex-wrap: wrap; gap: 12px; }
+  .review-header h2 { flex-basis: 100%; }
+  .review-actions { margin-left: auto; }
+  .review-message { padding: 12px 16px; }
   .review-detail .report-content { padding: 16px; }
 }
