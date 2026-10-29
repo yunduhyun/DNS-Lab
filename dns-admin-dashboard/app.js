@@ -10,7 +10,7 @@ import { renderAnalysis } from './markdown.js';
 
 const digest = value => createHash('sha256').update(value).digest();
 const validDomain = value => typeof value === 'string' && value.length <= 253 &&
-  /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(domainToASCII(value)) && !/[\s/@:#?\\]/.test(value);
+  /^(?=.{1,253}$)[a-z0-9_](?:[a-z0-9_.-]*[a-z0-9_])?$/.test(domainToASCII(value)) && !/[\s/@:#?\\]/.test(value);
 
 export function createApp({ store, username, password }) {
   if (!username || username.includes(':') || !password || password.length < 12) {
