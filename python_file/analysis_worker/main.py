@@ -3,6 +3,8 @@
 import json
 import subprocess
 import sys
+import time 
+
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -259,7 +261,17 @@ def main():
   analyzer = GemmaAnalyzer()
   storage = ReportStorage(s3, dynamodb)
   worker = SQSWorker(sqs, collector, analyzer, storage)
-  worker.run()
+  
+  try:
+    while True:
+      try:
+        worker.run()
+      except Exception as error:
+        print(f"작업 처리 오류: {type(error).__name__}")
+        print("5초 후 다음 메시지 수신을 시도합니다.")
+        time.sleep(5)
+  except KeyboardInterrupt:
+    print("\nworker를 종료합니다.")
 
 
 if __name__ == "__main__":

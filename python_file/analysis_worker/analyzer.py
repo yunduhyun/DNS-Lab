@@ -59,7 +59,7 @@ class GemmaAnalyzer:
     보고서와 reason에서 대상 도메인을 표시할 때는 domain_unicode를 사용한다.
     requested_url과 final_url은 실제 수집한 주소를 유지한다.
 
-    반드시 다음 필드를 가진 JSON 객체 하나만 반환한다.
+    반드시 다음 필드를 가진 JSON 객체 하나만 반환한다ut
     JSON 바깥의 설명이나 코드 블록은 출력하지 않는다.
 
     - decision: block, review, allow 중 하나
