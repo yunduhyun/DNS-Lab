@@ -244,3 +244,6 @@ button:disabled { cursor: not-allowed; }
   .review-message { padding: 12px 16px; }
   .review-detail .report-content { padding: 16px; }
 }
+
+.list-footer { gap: 12px; align-items: center; flex-wrap: wrap; }
+.list-footer span { font-size: 13px; color: var(--muted); }

@@ -2,7 +2,19 @@
 const $ = id => document.getElementById(id);
 const labels = { pending_enqueue: '전송 대기', Queued: '분석 대기', Analyzing: '분석 중', review: '검토 대기', no_block: '차단하지 않음', block_pending: '차단 반영 대기', blocked: '차단 대상', allow: '허용', failed: '처리 실패', faild: '처리 실패' };
 let reviewMode = false, reviewDomain = null, reviewSnapshot = null, reviewRequestId = 0, deciding = false, pendingDecision = null;
-let items = [], cursor = null, selected = null, requestId = 0;
+let items = [], selected = null, requestId = 0;
+const pageSize = 50;
+let domainPage = 1, reviewPage = 1;
+function pageItems(rows, kind) {
+  const pages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const page = Math.min(kind === "domain" ? domainPage : reviewPage, pages);
+  if (kind === "domain") domainPage = page; else reviewPage = page;
+  const prefix = kind === "domain" ? "" : "review-";
+  $(prefix + "page-info").textContent = `${page} / ${pages} 페이지 (총 ${rows.length}개)`;
+  $(prefix + "previous").disabled = listing || deleting || deciding || page === 1;
+  $(kind === "domain" ? "more" : "review-more").disabled = listing || deleting || deciding || page === pages;
+  return rows.slice((page - 1) * pageSize, page * pageSize);
+}
 let deleteTarget = null, deleting = false, listing = false, listRequestId = 0;
 const date = value => value && !Number.isNaN(new Date(value).getTime()) ? new Date(value).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false }) : '—';
 function element(tag, text, className) {
@@ -30,7 +42,7 @@ function render() {
   const keyword = $('search').value.trim().toLowerCase();
   const status = $('status').value;
   const visible = items
-    .filter(item => item.domain?.includes(keyword) && (!status || item.status === status))
+    .filter(item => item.domain?.toLowerCase().includes(keyword) && (!status || item.status === status))
     .sort((a, b) => registrationTime(b) - registrationTime(a));
   $('total').textContent = items.length;
   $('processing').textContent = items.filter(x => ['Queued', 'Analyzing', 'pending_enqueue'].includes(x.status)).length;
@@ -38,7 +50,7 @@ function render() {
   $('reports').textContent = items.filter(x => x.report_s3_key).length;
   $('count').textContent = `${visible.length}개`;
   $('rows').replaceChildren();
-  for (const item of visible) {
+  for (const item of pageItems(visible, "domain")) {
     const row = element('tr');
     if (item.domain === selected) row.className = 'selected';
     row.append(element('td', item.domain), element('td', date(item.created_at)));
@@ -83,13 +95,21 @@ async function load(reset = false) {
   $('refresh').disabled = true; $('more').disabled = true;
   $('list-message').textContent = '목록을 불러오는 중입니다...';
   try {
-    const data = await api(`/api/domains${!reset && cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`);
-    if (id !== listRequestId) return;
-    items = reset ? data.items : [...new Map([...items, ...data.items].map(item => [item.domain, item])).values()];
-    cursor = data.cursor;
+    const loaded = new Map();
+    const seenCursors = new Set();
+    let nextCursor = null, data;
+    do {
+      data = await api(`/api/domains${nextCursor ? `?cursor=${encodeURIComponent(nextCursor)}` : ''}`);
+      if (id !== listRequestId) return;
+      for (const item of data.items) loaded.set(item.domain, item);
+      nextCursor = data.cursor;
+      if (nextCursor && seenCursors.has(nextCursor)) throw new Error('다음 페이지 조회가 반복되었습니다. 새로고침해주세요.');
+      if (nextCursor) seenCursors.add(nextCursor);
+      $('list-message').textContent = `전체 목록을 불러오는 중입니다... ${loaded.size}개`;
+    } while (nextCursor);
+    items = [...loaded.values()];
+    if (reset) { domainPage = 1; reviewPage = 1; }
     if (reviewDomain) clearReview();
-    $('more').hidden = !cursor;
-    $('review-more').hidden = !cursor;
     $('mode').textContent = data.mode === 'demo'
       ? '샘플 데이터'
       : 'AWS 연결';
@@ -236,10 +256,11 @@ $('delete-form').addEventListener('submit', async event => {
     render();
   }
 });
-$('search').addEventListener('input', render);
-$('status').addEventListener('change', render);
+$('search').addEventListener('input', () => { domainPage = 1; render(); });
+$('status').addEventListener('change', () => { domainPage = 1; render(); });
 $('refresh').addEventListener('click', () => load(true));
-$('more').addEventListener('click', () => load());
+$('more').addEventListener('click', () => { domainPage++; render(); });
+$('previous').addEventListener('click', () => { domainPage--; render(); });
 for (const [id, value] of [['all-view', false], ['review-view', true]]) {
   $(id).addEventListener('click', () => {
     if (deciding) return;
@@ -269,7 +290,7 @@ function updateDecisionButtons() {
   const disabled = !reviewMode || !reviewSnapshot || deciding || listing;
   $('allow-domain').disabled = disabled;
   $('block-domain').disabled = disabled;
-  $('review-more').disabled = listing || deciding;
+
 }
 function renderReviews() {
   const keyword = $('review-search').value.trim().toLowerCase();
@@ -277,7 +298,7 @@ function renderReviews() {
     .sort((a, b) => registrationTime(b) - registrationTime(a));
   $('review-count').textContent = `${reviews.length}개`;
   $('review-rows').replaceChildren();
-  for (const item of reviews) {
+  for (const item of pageItems(reviews, "review")) {
     const button = element('button', undefined, 'review-item');
     button.dataset.domain = item.domain;
     button.setAttribute('aria-pressed', String(item.domain === reviewDomain));
@@ -384,6 +405,7 @@ $('confirm-decision').addEventListener('click', async () => {
     if (success) $('decision-modal').close();
   }
 });
-$('review-search').addEventListener('input', renderReviews);
-$('review-more').addEventListener('click', () => load());
+$('review-search').addEventListener('input', () => { reviewPage = 1; renderReviews(); });
+$('review-more').addEventListener('click', () => { reviewPage++; renderReviews(); });
+$('review-previous').addEventListener('click', () => { reviewPage--; renderReviews(); });
 load(true);

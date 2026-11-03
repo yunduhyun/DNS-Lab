@@ -141,20 +141,13 @@ def enqueue_pending(domain):
     try:
         table.update_item(
             Key={"domain": domain},
-
-            # 변경할 내용을 지정하는 구문
-            # 여기서 #status, :queued, :now는 실제 이름과 값을 대신하는 자리표시자
             UpdateExpression="SET #status = :queued, updated_at = :now",
-
-            # 변경 조건
             ConditionExpression=(
                 "#status = :pending AND created_at = :created"
             ),
-
             ExpressionAttributeNames={
                 "#status": "status"
             },
-
             ExpressionAttributeValues={
                 ":queued": "Queued",
                 ":pending": "pending_enqueue",
@@ -226,8 +219,6 @@ def lambda_handler(event, context):
 
   # dynamodb 조회를 통해 이미 등록된 도메인인지 확인
   for domain in sorted(analysis_domains):
-    # get_item은 키가 일치하는 항목 하나를 찾아낸다. 항목이 없다면 응답에 Item이 포함되지 않는다.
-    # ConsistentRead=True는 조회 시점에 앞서 완료된 쓰기를 반영하도록 하는 설정이다. 
     response = table.get_item(
       Key={"domain":domain},
       ConsistentRead=True
@@ -235,6 +226,7 @@ def lambda_handler(event, context):
 
     if "Item" in response:
       print(f"기존 도메인 : {domain}")
+      
     else:
       now = datetime.now(timezone.utc).isoformat()
 
@@ -266,3 +258,11 @@ def lambda_handler(event, context):
     enqueue_pending(domain)
 
   return {"status":"ok"}
+
+
+
+
+{
+  "domain": "example.com",
+  "job_id": "64자리 SHA-256 해시 문자열"
+}

@@ -55,10 +55,15 @@ async def collect_browser_data(url, observation_seconds):
       browser = await uc.start(host="127.0.0.1", port=port, user_data_dir=profile)
       tab = await browser.get("about:blank")
       await tab.send(cdp.browser.set_download_behavior(behavior="deny"))
+
       tree = await tab.get_frame_tree()
       frame_id = tree.frame.id_
+
       navigation_history = []
-      response_state = {"http_status": None, "cf_mitigated": ""}
+      response_state = {
+        "http_status": None, 
+        "cf_mitigated": ""
+      }
 
       async def record_request(event):
         if event.frame_id != frame_id or event.type_ != cdp.network.ResourceType.DOCUMENT:
@@ -79,21 +84,33 @@ async def collect_browser_data(url, observation_seconds):
 
         response_state["http_status"] = int(event.response.status)
         response_state["cf_mitigated"] = event.response.headers.get("cf-mitigated", "")
+
         navigation_history.append({
           "url": event.response.url,
           "http_status": int(event.response.status)
         })
 
-      tab.add_handler(cdp.network.RequestWillBeSent, record_request)
-      tab.add_handler(cdp.network.ResponseReceived, record_response)
+      tab.add_handler(
+        cdp.network.RequestWillBeSent,
+        record_request
+      )
+
+      tab.add_handler(
+        cdp.network.ResponseReceived, 
+        record_response
+      )
+
       await tab.send(cdp.network.enable())
+
       await tab.get(url)
       await asyncio.sleep(observation_seconds)
 
       final_url = await tab.evaluate("location.href")
       title = await tab.evaluate("document.title")
+
       body_text = ""
       has_body = await tab.evaluate("document.body !== null")
+
       if has_body:
         body_text = await tab.evaluate("document.body.innerText")
 
@@ -159,11 +176,14 @@ async def investigate_url(url: str, manual_verification: bool = False) -> dict:
       collect_browser_data(url, observation_seconds),
       timeout=150
     )
+
     cf_mitigated = data.pop("cf_mitigated")
     result.update(data)
+
     http_status = result["http_status"]
     title = result["title"]
     body_text = result["body_text"]
+
     challenge_titles = [
       "just a moment...",
       "잠시만 기다리십시오…",
@@ -175,6 +195,7 @@ async def investigate_url(url: str, manual_verification: bool = False) -> dict:
     if cf_mitigated == "challenge" or (has_challenge_title and has_cloudflare_text):
       result["status"] = "challenge"
       result["reason"] = "인증 화면이 지속되어 실제 콘텐츠를 확인하지 못했습니다."
+
     elif len(result["navigation_history"]) > 10:
       result["status"] = "limit_exceeded"
       result["reason"] = "메인 페이지 응답 기록이 10회를 초과했습니다."
@@ -193,9 +214,11 @@ async def investigate_url(url: str, manual_verification: bool = False) -> dict:
 
     result["needs_human_review"] = result["status"] != "success"
     return result
+  
   except TimeoutError:
     result["reason"] = "Chrome 조사 제한 시간을 초과했습니다."
     return result
+  
   except Exception as error:
     result["reason"] = f"Chrome 조사 중 오류({type(error).__name__})가 발생했습니다."
     return result

@@ -38,9 +38,9 @@ class DomainCollector:
 
     # 1. DNS 레코드 조회 (IPv4, IPv6, CNAME)
     dns_data = {}
-    record_types = ["A", "AAAA", "CNAME"]
     query_domain = domain.rstrip(".")
     query_domain = query_domain + "."
+    record_types = ["A", "AAAA", "CNAME"]
 
     for record_type in record_types:
       try:
@@ -130,7 +130,11 @@ class DomainCollector:
             charset = None
 
         # 헤더에 charset이 없을 경우 HTML meta 태그를 기반으로 디코딩을 시도한다.
-        soup = BeautifulSoup(web_data, "html.parser", from_encoding=charset)
+        soup = BeautifulSoup(
+          web_data, 
+          "html.parser", 
+          from_encoding=charset
+        )
 
         # 메타 태그의 속성을 수집 
         metadata = []
@@ -309,3 +313,8 @@ class DomainCollector:
 
     print("웹 정보를 수집 실패:", domain)
     return None
+
+
+
+
+

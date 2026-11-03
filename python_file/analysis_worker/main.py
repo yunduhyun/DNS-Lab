@@ -75,13 +75,14 @@ class ReportStorage:
 
   
     # S3 저장이 성공한 뒤 보고서 위치와 갱신 시각을 기록한다.
-        # S3 저장이 성공한 뒤 최종 상태와 보고서 위치 및 갱신 시각을 기록한다.
+    # S3 저장이 성공한 뒤 최종 상태와 보고서 위치 및 갱신 시각을 기록한다.
     self.dynamodb.update_item(
       TableName=TABLE_NAME,
       Key={
         "domain": {"S": domain}
       },
-      UpdateExpression="SET #status = :status, report_s3_key = :key, updated_at = :updated_at",
+      UpdateExpression="SET #status = " 
+      ":status, report_s3_key = :key, updated_at = :updated_at",
       ConditionExpression="attribute_exists(#domain)",
       ExpressionAttributeNames={
         "#domain": "domain",
@@ -241,9 +242,7 @@ class SQSWorker:
       analysis,
       analysis_result["decision"]
     )
-    print(f"S3 저장 및 DynamoDB 보고서 위치 기록 완료: {report_s3_key}")
-
-    # 보고서 저장과 DynamoDB 갱신이 성공한 작업만 큐에서 삭제한다.
+    
     self.sqs.delete_message(
       QueueUrl=self.queue_url,
       ReceiptHandle=message["ReceiptHandle"]
